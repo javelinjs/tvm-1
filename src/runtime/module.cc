@@ -15,6 +15,7 @@ namespace runtime {
 
 PackedFunc Module::GetFunction(
     const std::string& name, bool query_imports) {
+  fprintf(stderr, "GetFunction: %s\n", name);
   PackedFunc pf = node_->GetFunction(name, node_);
   if (pf != nullptr) return pf;
   if (query_imports) {

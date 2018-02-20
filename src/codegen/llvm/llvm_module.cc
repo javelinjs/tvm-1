@@ -36,6 +36,7 @@ class LLVMModuleNode final : public runtime::ModuleNode {
   PackedFunc GetFunction(
       const std::string& name,
       const std::shared_ptr<ModuleNode>& sptr_to_self) final {
+    fprintf(stderr, "GetFunction: %s\n", name.c_str());
     if (name == "__tvm_is_system_module") {
       bool flag =
           (mptr_->getFunction("__tvm_module_startup") != nullptr);
