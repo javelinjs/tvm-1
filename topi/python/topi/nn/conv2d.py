@@ -89,7 +89,11 @@ def conv2d(data, kernel, stride, padding, layout='NCHW', out_dtype='float32'):
 def _get_workload(data, kernel, stride, padding, out_dtype):
     """ Get the workload structure. """
     _, CI, IH, IW = [x.value for x in data.shape]
-    CO, _, KH, KW = [x.value for x in kernel.shape]
+    if len(kernel.shape) == 4:
+        CO, _, KH, KW = [x.value for x in kernel.shape]
+    else:
+        CO, _, KH, KW, ci, co = [x.value for x in kernel.shape]
+        CO *= co
     HPAD, WPAD, _, _ = get_pad_tuple(padding, kernel)
     if isinstance(stride, (tuple, list)):
         HSTR, WSTR = stride
@@ -260,7 +264,7 @@ def conv2d_nchw(Input, Filter, stride, padding, out_dtype='float32'):
     """
     assert isinstance(stride, int) or len(stride) == 2
     batch, in_channel, in_height, in_width = Input.shape
-    num_filter, channel, kernel_h, kernel_w = Filter.shape
+    num_filter, channel, kernel_h, kernel_w, _, _ = Filter.shape
     if isinstance(stride, int):
         stride_h = stride_w = stride
     else:
@@ -283,7 +287,7 @@ def conv2d_nchw(Input, Filter, stride, padding, out_dtype='float32'):
         (batch, out_channel, out_height, out_width),
         lambda nn, ff, yy, xx: tvm.sum(
             temp[nn, rc, yy * stride_h + ry, xx * stride_w + rx].astype(out_dtype) *
-            Filter[ff, rc, ry, rx].astype(out_dtype),
+            Filter[ff, rc, ry, rx, 0, 0].astype(out_dtype),
             axis=[rc, ry, rx]), tag="conv2d_nchw")
 
 

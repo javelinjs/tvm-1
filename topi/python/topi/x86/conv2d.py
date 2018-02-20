@@ -20,7 +20,7 @@ _AVX_SCH_TO_SCH_FUNC = {
     AVXConv1x1Fwd: conv2d_avx_1x1._schedule_conv
 }
 
-@_get_schedule.register("cpu")
+# @_get_schedule.register("cpu")
 def _get_schedule_conv(wkl):
     if wkl not in _WORKLOADS:
         raise ValueError("no schedule for such workload: {}".format(wkl))
@@ -63,7 +63,7 @@ def _get_schedule_conv(wkl):
     return sch
 
 
-@conv2d.register("cpu")
+# @conv2d.register("cpu")
 def _declaration_conv(data, kernel, stride, padding, layout, out_dtype):
     target = tvm.target.current_target(allow_none=False)
     if 'avx' in str(target) and layout == 'NCHW':
@@ -80,7 +80,7 @@ def _declaration_conv(data, kernel, stride, padding, layout, out_dtype):
         raise ValueError("not support this layout {} yet".format(layout))
 
 
-@generic.schedule_conv2d_nchw.register(["cpu"])
+# @generic.schedule_conv2d_nchw.register(["cpu"])
 def schedule_conv2d(outs):
     """Create schedule for tensors"""
     s = tvm.create_schedule([x.op for x in outs])
@@ -152,7 +152,7 @@ def schedule_conv2d(outs):
     return s
 
 
-@generic.schedule_conv2d_nhwc.register(["cpu"])
+# @generic.schedule_conv2d_nhwc.register(["cpu"])
 def schedule_conv2d_nhwc(outs):
     """Create schedule for tensors"""
     s = tvm.create_schedule([x.op for x in outs])

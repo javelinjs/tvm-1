@@ -20,7 +20,11 @@ def _declaration_conv(data, kernel, stride, padding, layout, out_dtype):
     HSTR, WSTR = wkl.hstride, wkl.wstride
 
     batch_size, in_channel, in_height, in_width = get_const_tuple(data.shape)
-    num_filter, _, kernel_height, kernel_width = get_const_tuple(kernel.shape)
+    if len(kernel.shape) == 4:
+        num_filter, _, kernel_height, kernel_width = get_const_tuple(kernel.shape)
+    else:
+        num_filter, _, kernel_height, kernel_width, ic, oc = get_const_tuple(kernel.shape)
+        num_filter *= oc
 
     pad_height = in_height + 2 * HPAD
     pad_width = in_width + 2 * WPAD

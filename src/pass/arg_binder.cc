@@ -46,9 +46,24 @@ bool ArgBinder::Bind_(const Expr& arg,
       }
       return true;
     } else {
+//      if (it->second->derived_from<tvm::ir::IntImm>()) {
+//        fprintf(stderr, "bind arg check1. arg_name=%s, it->second=%d, value=%d\n", arg_name.c_str());
+//                it->second.as<tvm::ir::IntImm>()->value,
+//                value.as<tvm::ir::IntImm>()->value);
+//      }
       BinderAddAssert(it->second == value, arg_name, &asserts_);
     }
   } else {
+    if (arg->derived_from<tvm::ir::IntImm>() && value->derived_from<tvm::ir::IntImm>()) {
+      fprintf(stderr, "bind arg check2. arg_name=%s, arg=%d, value=%d\n", arg_name.c_str(),
+              arg.as<tvm::ir::IntImm>()->value,
+              value.as<tvm::ir::IntImm>()->value);
+    }
+    if (arg->derived_from<tvm::ir::UIntImm>() && value->derived_from<tvm::ir::UIntImm>()) {
+      fprintf(stderr, "bind arg check2. arg_name=%s, arg=%d, value=%d\n", arg_name.c_str(),
+              arg.as<tvm::ir::UIntImm>()->value,
+              value.as<tvm::ir::UIntImm>()->value);
+    }
     BinderAddAssert(arg == value, arg_name, &asserts_);
   }
   return false;
