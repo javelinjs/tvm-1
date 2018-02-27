@@ -533,13 +533,13 @@ void GraphRuntime::SetupOpExecs() {
     }
     CHECK_EQ(inode.op_type, "tvm_op")
         << "Can only take tvm_op as op";
-    fprintf(stderr, "op_execs_[%d] func_name = %s\n", nid, inode.param.func_name.c_str());
+    // fprintf(stderr, "op_execs_[%d] func_name = %s\n", nid, inode.param.func_name.c_str());
     for (DLTensor &t : args) {
-      fprintf(stderr, "arg shape = ");
+      // fprintf(stderr, "arg shape = ");
       for (int i = 0; i < t.ndim; ++i) {
-        fprintf(stderr, "%d, ", t.shape[i]);
+        // fprintf(stderr, "%d, ", t.shape[i]);
       }
-      fprintf(stderr, "\n");
+      // fprintf(stderr, "\n");
     }
     op_execs_[nid] = CreateTVMOp(inode.param, args, inode.inputs.size());
   }

@@ -95,10 +95,10 @@ class GraphModule(object):
         """
         if key:
             self._set_input(key, nd.array(value, ctx=self.ctx))
-            print('set_input key = ' + str(key) + ', value = ' + str(value.shape))
+            # print('set_input key = ' + str(key) + ', value = ' + str(value.shape))
         for k, v in params.items():
             self._set_input(k, nd.array(v, ctx=self.ctx))
-            print('set_input params key = ' + str(k) + ', value = ' + str(v.shape))
+            # print('set_input params key = ' + str(k) + ', value = ' + str(v.shape))
         return self
 
     def run(self, **input_dict):
@@ -111,7 +111,7 @@ class GraphModule(object):
         """
         if input_dict:
             self.set_input(**input_dict)
-        print('run input_dict = ' + str(input_dict))
+        # print('run input_dict = ' + str(input_dict))
         self._run()
 
     def get_output(self, index, out):
