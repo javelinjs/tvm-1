@@ -54,6 +54,11 @@ def schedule_conv2d_nhwc(outs):
 
 
 @tvm.target.generic_func
+def schedule_conv2d_prepack(outs):
+    return _default_schedule(outs, False)
+
+
+@tvm.target.generic_func
 def schedule_conv2d_transpose_nchw(outs):
     """Schedule for conv2d_transpose_nchw
 
