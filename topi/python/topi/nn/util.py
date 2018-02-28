@@ -54,7 +54,11 @@ def infer_stride(data, kernel, out):
     if len(kernel.shape) == 4:
         _, _, KH, KW = kernel.shape
     else:
-        _, _, KH, KW, _, _ = kernel.shape
+        CO, CI, a, b, c, d = kernel.shape
+        if c == 1 and d == 1:
+            KH, KW, CO = 1, 1, CO*b
+        else:
+            KH, KW, CO = a, b, CO*d
     _, _, OH, OW = out.shape
     hstride = (IH - KH) // (OH - 1)
     wstride = (IW - KW) // (OW - 1)

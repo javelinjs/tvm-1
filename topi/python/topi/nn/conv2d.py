@@ -94,8 +94,11 @@ def _get_workload(data, kernel, stride, padding, out_dtype):
     if len(kernel.shape) == 4:
         CO, _, KH, KW = [x.value for x in kernel.shape]
     else:
-        CO, _, KH, KW, _, co = [x.value for x in kernel.shape]
-        CO *= co
+        CO, CI, a, b, c, d = [x.value for x in kernel.shape]
+        if c == 1 and d == 1:
+            KH, KW, CO = 1, 1, CO*b
+        else:
+            KH, KW, CO = a, b, CO*d
     HPAD, WPAD, _, _ = get_pad_tuple(padding, kernel)
     if isinstance(stride, (tuple, list)):
         HSTR, WSTR = stride
