@@ -94,7 +94,7 @@ def _get_workload(data, kernel, stride, padding, out_dtype):
     if len(kernel.shape) == 4:
         CO, _, KH, KW = [x.value for x in kernel.shape]
     else:
-        CO, CI, a, b, c, d = [x.value for x in kernel.shape]
+        CO, _, a, b, c, d = [x.value for x in kernel.shape]
         if c == 1 and d == 1:
             KH, KW, CO = 1, 1, CO*b
         else:
