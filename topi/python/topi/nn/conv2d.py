@@ -91,7 +91,10 @@ def conv2d(data, kernel, stride, padding, layout='NCHW', out_dtype='float32'):
 def _get_workload(data, kernel, stride, padding, out_dtype):
     """ Get the workload structure. """
     _, CI, IH, IW = [x.value for x in data.shape]
-    CO, _, KH, KW = [x.value for x in kernel.shape]
+    if len(kernel.shape) == 4:
+        CO, _, KH, KW = [x.value for x in kernel.shape]
+    else:
+        CO, _, KH, KW, _, _ = [x.value for x in kernel.shape]
     HPAD, WPAD, _, _ = get_pad_tuple(padding, kernel)
     if isinstance(stride, (tuple, list)):
         HSTR, WSTR = stride
