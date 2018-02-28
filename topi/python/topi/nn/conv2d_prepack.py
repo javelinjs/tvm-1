@@ -8,7 +8,7 @@ from .util import get_pad_tuple
 from ..util import simplify
 
 @tvm.target.generic_func
-def conv2d_prepack(data, kernel, stride, padding, layout='NCHW', out_dtype='float32'):
+def conv2d_prepack(data, kernel, kernel_size, stride, padding, layout='NCHW', out_dtype='float32'):
     """Conv2D operator.
 
     Parameters
