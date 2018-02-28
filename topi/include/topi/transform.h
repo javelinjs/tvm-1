@@ -136,16 +136,29 @@ inline Tensor reorder(const Tensor& x,
                       std::string name = "tensor",
                       std::string tag = kInjective) {
   auto x_shape = x->shape;
+  auto kh = GetConstInt(x_shape[2]);
+  auto kw = GetConstInt(x_shape[3]);
   return compute(
   newshape, [&](const Array<Var>& indices) {
-    // (oc, ic, h, w) -> (OC, IC, h, w, ic, oc)
-    Expr CO = indices[0];
-    Expr CI = indices[1];
-    Expr h = indices[2];
-    Expr w = indices[3];
-    Expr ci = indices[4];
-    Expr co = indices[5];
-    return x(CO * oc_bn + co, CI * ic_bn + ci, h, w);
+    if (kh == 1 && kw == 1) {
+      // (oc, ic, h, w) -> (OC, IC, ic, oc, h, w)
+      Expr CO = indices[0];
+      Expr CI = indices[1];
+      Expr ci = indices[2];
+      Expr co = indices[3];
+      Expr h = indices[4];
+      Expr w = indices[5];
+      return x(CO * oc_bn + co, CI * ic_bn + ci, h, w);
+    } else {
+      // (oc, ic, h, w) -> (OC, IC, h, w, ic, oc)
+      Expr CO = indices[0];
+      Expr CI = indices[1];
+      Expr h = indices[2];
+      Expr w = indices[3];
+      Expr ci = indices[4];
+      Expr co = indices[5];
+      return x(CO * oc_bn + co, CI * ic_bn + ci, h, w);
+    }
   }, name, tag);
 }
 
