@@ -133,14 +133,13 @@ inline Tensor reorder(const Tensor& x,
                       Array<Expr> newshape,
                       const int oc_bn,
                       const int ic_bn,
+                      const bool kernel_1x1,
                       std::string name = "tensor",
                       std::string tag = kInjective) {
   auto x_shape = x->shape;
-  auto kh = GetConstInt(x_shape[2]);
-  auto kw = GetConstInt(x_shape[3]);
   return compute(
   newshape, [&](const Array<Var>& indices) {
-    if (kh == 1 && kw == 1) {
+    if (kernel_1x1) {
       // (oc, ic, h, w) -> (OC, IC, ic, oc, h, w)
       Expr CO = indices[0];
       Expr CI = indices[1];
