@@ -52,6 +52,7 @@ class GraphRuntime : public ModuleNode {
   void Run() {
     // setup the array and requirements.
     for (size_t i = 0; i < op_execs_.size(); ++i) {
+      fprintf(stderr, "Ready to run %dth op_exec\n", i);
       if (op_execs_[i]) op_execs_[i]();
     }
   }

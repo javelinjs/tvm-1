@@ -129,6 +129,39 @@ inline Tensor reshape(const Tensor& x,
     }, name, tag);
 }
 
+inline Tensor reorder(const Tensor& x,
+                      Array<Expr> newshape,
+                      const int oc_bn,
+                      const int ic_bn,
+                      std::string name = "tensor",
+                      std::string tag = kInjective) {
+  auto x_shape = x->shape;
+  auto kh = GetConstInt(x_shape[2]);
+  auto kw = GetConstInt(x_shape[3]);
+  return compute(
+  newshape, [&](const Array<Var>& indices) {
+    if (kh == 1 && kw == 1) {
+      // (oc, ic, h, w) -> (OC, IC, ic, oc, h, w)
+      Expr CO = indices[0];
+      Expr CI = indices[1];
+      Expr ci = indices[2];
+      Expr co = indices[3];
+      Expr h = indices[4];
+      Expr w = indices[5];
+      return x(CO * oc_bn + co, CI * ic_bn + ci, h, w);
+    } else {
+      // (oc, ic, h, w) -> (OC, IC, h, w, ic, oc)
+      Expr CO = indices[0];
+      Expr CI = indices[1];
+      Expr h = indices[2];
+      Expr w = indices[3];
+      Expr ci = indices[4];
+      Expr co = indices[5];
+      return x(CO * oc_bn + co, CI * ic_bn + ci, h, w);
+    }
+  }, name, tag);
+}
+
 /*!
 * \brief Remove size 1 dimensions from the shape of a tensor.
 * The removed dimensions must have a constant size of 1.
