@@ -51,14 +51,7 @@ def infer_stride(data, kernel, out):
         stride size on width
     """
     _, _, IH, IW = data.shape
-    if len(kernel.shape) == 4:
-        _, _, KH, KW = kernel.shape
-    else:
-        CO, CI, a, b, c, d = kernel.shape
-        if c == 1 and d == 1:
-            KH, KW, CO = 1, 1, CO*b
-        else:
-            KH, KW, CO = a, b, CO*d
+    _, _, KH, KW = kernel.shape
     _, _, OH, OW = out.shape
     hstride = (IH - KH) // (OH - 1)
     wstride = (IW - KW) // (OW - 1)
