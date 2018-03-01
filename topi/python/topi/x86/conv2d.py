@@ -33,7 +33,7 @@ def _get_schedule_conv(wkl):
             fp32_vec_len = 16
 
     _SCHEDULES_AVX_NCHW = [
-        # float32 resnet-18
+        # workloads of resnet18_v1 on imagenet
         AVXConvCommonFwd(3, fp32_vec_len, 28, False),
         AVXConvCommonFwd(16, fp32_vec_len, 28, False),
         AVXConv1x1Fwd(16, fp32_vec_len, 1, 28),
@@ -46,17 +46,90 @@ def _get_schedule_conv(wkl):
         AVXConvCommonFwd(16, 32, 7, True),
         AVXConv1x1Fwd(16, fp32_vec_len, 1, 7),
         AVXConvCommonFwd(16, fp32_vec_len, 7, True),
-        # float32 mobilenet
-        AVXConvCommonFwd(3, fp32_vec_len, 28, False),
-        AVXConv1x1Fwd(16, fp32_vec_len, 1, 28),
-        AVXConv1x1Fwd(16, fp32_vec_len, 1, 28),
-        AVXConv1x1Fwd(16, fp32_vec_len, 1, 28),
-        AVXConv1x1Fwd(16, fp32_vec_len, 1, 28),
-        AVXConv1x1Fwd(16, fp32_vec_len, 1, 28),
-        AVXConv1x1Fwd(16, fp32_vec_len, 2, 14),
-        AVXConv1x1Fwd(16, fp32_vec_len, 2, 14),
-        AVXConv1x1Fwd(16, fp32_vec_len, 1, 7),
-        AVXConv1x1Fwd(16, fp32_vec_len, 1, 7),
+        # workloads of resnet34_v1 on imagenet, no extra workload required
+        # workloads of resnet50_v1 on imagenet
+        AVXConv1x1Fwd(ic_bn=16, oc_bn=16, oh_factor=2, ow_factor=28),
+        AVXConv1x1Fwd(ic_bn=16, oc_bn=16, oh_factor=2, ow_factor=28),
+        AVXConv1x1Fwd(ic_bn=16, oc_bn=16, oh_factor=2, ow_factor=28),
+        AVXConv1x1Fwd(ic_bn=16, oc_bn=16, oh_factor=2, ow_factor=28),
+        AVXConv1x1Fwd(ic_bn=16, oc_bn=32, oh_factor=2, ow_factor=28),
+        AVXConv1x1Fwd(ic_bn=16, oc_bn=32, oh_factor=2, ow_factor=28),
+        AVXConv1x1Fwd(ic_bn=16, oc_bn=32, oh_factor=2, ow_factor=14),
+        AVXConv1x1Fwd(ic_bn=16, oc_bn=16, oh_factor=2, ow_factor=14),
+        AVXConv1x1Fwd(ic_bn=16, oc_bn=16, oh_factor=2, ow_factor=14),
+        AVXConv1x1Fwd(ic_bn=16, oc_bn=16, oh_factor=2, ow_factor=14),
+        AVXConv1x1Fwd(ic_bn=16, oc_bn=16, oh_factor=2, ow_factor=7),
+        AVXConv1x1Fwd(ic_bn=16, oc_bn=16, oh_factor=2, ow_factor=7),
+        AVXConv1x1Fwd(ic_bn=16, oc_bn=32, oh_factor=2, ow_factor=7),
+        AVXConv1x1Fwd(ic_bn=16, oc_bn=16, oh_factor=2, ow_factor=7),
+        # workloads of resnet101_v1 on imagenet, no extra workload required
+        # workloads of resnet152_v1 on imagenet, no extra workload required
+        # workloads of resnet18_v2 on imagenet, no extra workload required
+        # workloads of resnet34_v2 on imagenet, no extra workload required
+        # workloads of resnet50_v2 on imagenet
+        AVXConvCommonFwd(ic_bn=16, oc_bn=16, reg_n=28, unroll_kw=True),
+        AVXConvCommonFwd(ic_bn=16, oc_bn=32, reg_n=14, unroll_kw=False),
+        AVXConvCommonFwd(ic_bn=16, oc_bn=32, reg_n=7, unroll_kw=True),
+        # workloads of resnet101_v2 on imagenet, no extra workload required
+        # workloads of resnet152_v2 on imagenet, no extra workload required
+        # workloads of mobilenet 1.0 on imagenet 10 29-38
+        AVXConvCommonFwd(3, 16, 28, True),
+        AVXConv1x1Fwd(16, 32, 2, 28),
+        AVXConv1x1Fwd(16, 16, 2, 28),
+        AVXConv1x1Fwd(16, 16, 2, 28),
+        AVXConv1x1Fwd(16, 16, 2, 28),
+        AVXConv1x1Fwd(16, 32, 2, 28),
+        AVXConv1x1Fwd(16, 32, 2, 14),
+        AVXConv1x1Fwd(16, 32, 2, 14),
+        AVXConv1x1Fwd(16, 32, 2, 7),
+        AVXConv1x1Fwd(16, 16, 2, 7),
+        # workloads of mobilenet 0.75 on imagenet 9 39-47
+        AVXConvCommonFwd(3, 16, 28, False),
+        AVXConv1x1Fwd(16, 32, 2, 28),
+        AVXConv1x1Fwd(16, 16, 2, 28),
+        AVXConv1x1Fwd(16, 16, 2, 28),
+        AVXConv1x1Fwd(16, 16, 2, 28),
+        AVXConv1x1Fwd(16, 32, 2, 14),
+        AVXConv1x1Fwd(16, 32, 2, 14),
+        AVXConv1x1Fwd(16, 16, 2, 7),
+        AVXConv1x1Fwd(16, 16, 2, 7),
+        # workloads of mobilenet 0.5 on imagenet 8 48-55
+        AVXConvCommonFwd(3, 32, 28, True),
+        AVXConv1x1Fwd(16, 32, 2, 28),
+        AVXConv1x1Fwd(16, 32, 2, 28),
+        AVXConv1x1Fwd(16, 16, 2, 28),
+        AVXConv1x1Fwd(16, 16, 2, 14),
+        AVXConv1x1Fwd(16, 16, 2, 14),
+        AVXConv1x1Fwd(16, 16, 2, 7),
+        AVXConv1x1Fwd(16, 16, 2, 7),
+        # workloads of mobilenet 0.25 on imagenet 56-65
+        AVXConvCommonFwd(3, 16, 28, False),
+        AVXConv1x1Fwd(8, 16, 2, 28),
+        AVXConv1x1Fwd(16, 32, 2, 28),
+        AVXConv1x1Fwd(16, 32, 2, 28),
+        AVXConv1x1Fwd(16, 32, 2, 28),
+        AVXConv1x1Fwd(16, 16, 2, 28),
+        AVXConv1x1Fwd(16, 16, 2, 14),
+        AVXConv1x1Fwd(16, 16, 2, 14),
+        AVXConv1x1Fwd(16, 32, 2, 7),
+        AVXConv1x1Fwd(16, 16, 2, 7),
+        # workloads of vgg11 on imagenet 66-72
+        AVXConvCommonFwd(3, 32, 32, True),
+        AVXConvCommonFwd(16, 16, 28, True),
+        AVXConvCommonFwd(16, 32, 28, False),
+        AVXConvCommonFwd(16, 16, 28, True),
+        AVXConvCommonFwd(16, 32, 28, False),
+        AVXConvCommonFwd(16, 16, 28, True),
+        AVXConvCommonFwd(16, 16, 14, False),
+        # workloads of vgg13 on imagenet 73-74
+        AVXConvCommonFwd(16, 16, 32, True),
+        AVXConvCommonFwd(16, 16, 28, True),
+        # workloads of vgg16 on imagenet, no extra workload required
+        # workloads of vgg19 on imagenet, no extra workload required
+        # workloads of vgg11_bn on imagenet, no extra workload required
+        # workloads of vgg13_bn on imagenet, no extra workload required
+        # workloads of vgg16_bn on imagenet, no extra workload required
+        # workloads of vgg19_bn on imagenet, no extra workload required
     ]
 
     sch = _SCHEDULES_AVX_NCHW[idx]
