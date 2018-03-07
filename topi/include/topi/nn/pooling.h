@@ -202,6 +202,87 @@ inline Tensor pool_nhwc(const Tensor& x,
   }
 }
 
+
+inline Tensor pool_nChwc(const Tensor& x,
+                         const Array<Expr>& kernel_size,
+                         const Array<Expr>& stride_size,
+                         const Array<Expr>& padding_size,
+                         PoolType pool_type,
+                         bool ceil_mode) {
+  CHECK_EQ(x->shape.size(), 5) << "nChwc pooling input must be 5-D";
+  CHECK_EQ(kernel_size.size(), 2) << "Pooling kernel_size must have 2 elements";
+  CHECK_EQ(stride_size.size(), 2) << "Pooling stride_size must have 2 elements";
+  CHECK_EQ(padding_size.size(), 2) << "Pooling padding_size must have 2 elements";
+
+  auto kernel_height = kernel_size[0];
+  auto kernel_width = kernel_size[1];
+  auto stride_height = stride_size[0];
+  auto stride_width = stride_size[1];
+  auto padding_height = padding_size[0];
+  auto padding_width = padding_size[1];
+
+  auto batch = x->shape[0];
+  auto channel_chunk = x->shape[1];
+  auto height = x->shape[2];
+  auto width = x->shape[3];
+  auto channel_block = x->shape[4];
+
+  auto pad_tuple = detail::GetPadTuple(padding_height, padding_width);
+  auto pad_top = pad_tuple[0];
+  auto pad_left = pad_tuple[1];
+  auto pad_down = pad_tuple[2];
+  auto pad_right = pad_tuple[3];
+
+  if (ceil_mode) {
+    // Additional padding to ensure we do ceil instead of floor when
+    // dividing by stride.
+    pad_down += stride_height - 1;
+    pad_right += stride_width - 1;
+  }
+
+  Array<Expr> pad_before{ 0, 0, pad_top, pad_left };
+  Array<Expr> pad_after{ 0, 0, pad_down, pad_right };
+
+  auto out_height = tvm::ir::Simplify(
+  (height - kernel_height + pad_top + pad_down) / stride_height + 1);
+  auto out_width = tvm::ir::Simplify(
+  (width - kernel_width + pad_left + pad_right) / stride_width + 1);
+
+  auto dheight = tvm::reduce_axis(Range(0, kernel_height));
+  auto dwidth = tvm::reduce_axis(Range(0, kernel_width));
+
+  if (pool_type == kMaxPool) {
+    auto temp = pad(x, pad_before, pad_after, x->dtype.min(), "pad_temp");
+    return tvm::compute(
+    { batch, channel_chunk, out_height, out_width, channel_block },
+    [&](const Array<Var>& shape) {
+      Var n = shape[0]; Var C = shape[1]; Var h = shape[2]; Var w = shape[3]; Var c = shape[4];
+      return tvm::max(temp(n, C, h * stride_height + dheight, w * stride_width + dwidth, c),
+                      { dheight, dwidth });
+    }, "tensor", "pool_max");
+  } else if (pool_type == kAvgPool) {
+    auto temp = pad(x, pad_before, pad_after, 0, "pad_temp");
+
+    auto tsum = tvm::compute(
+    { batch, channel_chunk, out_height, out_width, channel_block },
+    [&](const Array<Var>& shape) {
+      Var n = shape[0]; Var C = shape[1]; Var h = shape[2]; Var w = shape[3]; Var c = shape[4];
+      return tvm::sum(temp(n, C, h * stride_height + dheight, w * stride_width + dwidth, c),
+                      { dheight, dwidth });
+    }, "tensor", "pool_avg");
+
+    return tvm::compute(
+    { batch, channel_chunk, out_height, out_width, channel_block },
+    [&](const Array<Var>& shape) {
+      Var n = shape[0]; Var C = shape[1]; Var h = shape[2]; Var w = shape[3]; Var c = shape[4];
+      return tsum(n, C, h, w, c) / (kernel_height * kernel_width);
+    }, "tensor", kElementWise);
+  } else {
+    LOG(ERROR) << "Unrecognized pool_type: " << pool_type;
+    return x;
+  }
+}
+
 /*!
 * \brief Perform pooling on data
 *
@@ -223,8 +304,10 @@ inline Tensor pool(const Tensor& x,
                    PoolType pool_type,
                    bool ceil_mode,
                    const std::string& layout = "NCHW") {
-  CHECK(layout == "NCHW" || layout == "NHWC") << "Unsupported layout.";
-  if (layout == "NCHW")
+  CHECK(layout == "NCHW" || layout == "NHWC" || layout == "NCHWc") << "Unsupported layout.";
+  if (layout == "NCHWc") {
+    return pool_nChwc(x, kernel_size, stride_size, padding_size, pool_type, ceil_mode);
+  } else if (layout == "NCHW")
     return pool_nchw(x, kernel_size, stride_size, padding_size, pool_type, ceil_mode);
   else
     return pool_nhwc(x, kernel_size, stride_size, padding_size, pool_type, ceil_mode);
