@@ -152,8 +152,6 @@ inline Tensor pool(const Tensor& x,
                    PoolType pool_type,
                    bool ceil_mode,
                    const std::string& layout = "NCHW") {
-  CHECK(layout == "NCHW" || layout == "NHWC" || layout == "NCHW16c" || layout == "NCHW8c")
-        << "Unsupported layout " << layout;
   if (layout.rfind("NCHW") == 0) {
     return pool_impl(x, kernel_size, stride_size, padding_size, pool_type, ceil_mode, 2, 3);
   } else if (layout == "NHWC") {
