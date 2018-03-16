@@ -54,11 +54,6 @@ def schedule_conv2d_nhwc(outs):
 
 
 @tvm.target.generic_func
-def schedule_conv2d_prepack(kernel_size, outs):
-    return _default_schedule(outs, False)
-
-
-@tvm.target.generic_func
 def schedule_conv2d_nopack(kernel_size, outs):
     return _default_schedule(outs, False)
 
