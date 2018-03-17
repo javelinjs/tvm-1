@@ -1,23 +1,27 @@
 # pylint: disable=invalid-name, unused-variable, too-many-locals, unused-argument
 """Conv2D (kernel prepack) operators"""
 from __future__ import absolute_import as _abs
-from collections import namedtuple
 import tvm
-from .pad import pad
-from .util import get_pad_tuple
-from ..util import simplify
 
 @tvm.target.generic_func
-def conv2d_nopack(data, kernel, kernel_size, stride, padding, layout='NCHWc', out_dtype='float32'):
-    """Conv2D operator.
+def conv2d_nChwc(data, kernel, num_filter, kernel_size, stride, padding, out_dtype='float32'):
+    """Conv2D operator for nChw[x]c layout.
 
     Parameters
     ----------
     input : tvm.Tensor
-        4-D with shape [batch, in_channel, in_height, in_width]
+        5-D with shape [batch, in_channel_chunk, in_height, in_width, in_channel_block]
 
     filter : tvm.Tensor
-        4-D with shape [num_filter, in_channel, filter_height, filter_width]
+        6-D with shape
+        [num_filter_chunk, in_channel_chunk, filter_height, filter_width,
+        in_channel_block, num_filter_block]
+
+    num_filter : int
+        number of filters, i.e., output channel size
+
+    kernel_size : tuple of two ints
+        [kernel_height, kernel_width]
 
     stride : int or a list/tuple of two ints
         stride size, or [stride_height, stride_width]
@@ -31,8 +35,8 @@ def conv2d_nopack(data, kernel, kernel_size, stride, padding, layout='NCHWc', ou
     Returns
     -------
     output : tvm.Tensor
-        4-D with shape [batch, out_channel, out_height, out_width]
+        5-D with shape [batch, out_channel_chunk, out_height, out_width, out_channel_block]
     """
     # search platform specific declaration first
     # default declaration
-    raise ValueError("missing register for topi.nn.conv2d_prepack")
+    raise ValueError("missing register for topi.nn.conv2d_nChwc")
