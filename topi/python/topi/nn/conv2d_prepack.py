@@ -43,7 +43,7 @@ def conv2d_nChwc(data, kernel, num_filter, kernel_size, stride, padding, out_dty
 
 
 @tvm.target.generic_func
-def _contrib_conv2d_nchwc_kernel_packed(data, kernel, num_filter, kernel_size, stride, padding, out_dtype='float32'):
+def conv2d_nchw_kernel_packed(data, kernel, num_filter, kernel_size, stride, padding, out_dtype='float32'):
     """Conv2D operator for NCHW layout with kernel pack.
 
     Parameters
@@ -75,4 +75,4 @@ def _contrib_conv2d_nchwc_kernel_packed(data, kernel, num_filter, kernel_size, s
     """
     # search platform specific declaration first
     # default declaration
-    raise ValueError("missing register for topi.nn._contrib_conv2d_nchwc_kernel_packed")
+    raise ValueError("missing register for topi.nn.conv2d_nchw_kernel_packed")

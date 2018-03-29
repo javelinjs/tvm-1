@@ -59,7 +59,7 @@ def schedule_conv2d_nChwc(num_filter, kernel_size, outs):
 
 
 @tvm.target.generic_func
-def schedule_contrib_conv2d_nchwc_kernel_packed(num_filter, kernel_size, outs):
+def schedule_conv2d_nchw_kernel_packed(num_filter, kernel_size, outs):
     return _default_schedule(outs, False)
 
 
