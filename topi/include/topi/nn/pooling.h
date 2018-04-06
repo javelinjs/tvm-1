@@ -7,6 +7,7 @@
 #define TOPI_NN_POOLING_H_
 
 #include <string>
+#include <vector>
 
 #include "tvm/tvm.h"
 #include "tvm/ir_pass.h"
@@ -47,7 +48,7 @@ inline Tensor pool_impl(const Tensor& x,
                         bool ceil_mode,
                         const size_t height_idx,
                         const size_t width_idx) {
-  CHECK(x->shape.size() == 4 || x->shape.size() == 5) << "Pooling input must be 4-D or 5-D";
+  CHECK(x->shape.size() >= 2) << "Pooling input must >= 2-D (H, W)";
   CHECK_EQ(kernel_size.size(), 2) << "Pooling kernel_size must have 2 elements";
   CHECK_EQ(stride_size.size(), 2) << "Pooling stride_size must have 2 elements";
   CHECK_EQ(padding_size.size(), 2) << "Pooling padding_size must have 2 elements";
@@ -75,11 +76,11 @@ inline Tensor pool_impl(const Tensor& x,
     pad_right += stride_width - 1;
   }
 
-  Array<Expr> pad_before{ 0, 0, 0, 0, 0 };
+  Array<Expr> pad_before(std::vector<Expr>(x->shape.size(), 0));
   pad_before.Set(height_idx, pad_top);
   pad_before.Set(width_idx, pad_left);
 
-  Array<Expr> pad_after{ 0, 0, 0, 0, 0 };
+  Array<Expr> pad_after(std::vector<Expr>(x->shape.size(), 0));
   pad_after.Set(height_idx, pad_down);
   pad_after.Set(width_idx, pad_right);
 
@@ -99,10 +100,8 @@ inline Tensor pool_impl(const Tensor& x,
     auto temp = pad(x, pad_before, pad_after, x->dtype.min(), "pad_temp");
     return tvm::compute(out_shape,
     [&](const Array<Var>& output) {
-      Array<Expr> indices{ output[0], output[1], output[2], output[3] };
-      if (output.size() == 5) {
-        indices.push_back(output[4]);
-      }
+      Array<Expr> indices;
+      for (const Var& var : output) indices.push_back(var);
       indices.Set(height_idx, output[height_idx] * stride_height + dheight);
       indices.Set(width_idx, output[width_idx] * stride_width + dwidth);
       return tvm::max(temp(indices), { dheight, dwidth });
@@ -112,10 +111,8 @@ inline Tensor pool_impl(const Tensor& x,
 
     auto tsum = tvm::compute(out_shape,
     [&](const Array<Var>& output) {
-      Array<Expr> indices{ output[0], output[1], output[2], output[3] };
-      if (output.size() == 5) {
-        indices.push_back(output[4]);
-      }
+      Array<Expr> indices;
+      for (const Var& var : output) indices.push_back(var);
       indices.Set(height_idx, output[height_idx] * stride_height + dheight);
       indices.Set(width_idx, output[width_idx] * stride_width + dwidth);
       return tvm::sum(temp(indices), { dheight, dwidth });
@@ -152,13 +149,22 @@ inline Tensor pool(const Tensor& x,
                    PoolType pool_type,
                    bool ceil_mode,
                    const std::string& layout = "NCHW") {
-  if (layout.rfind("NCHW") == 0) {
-    return pool_impl(x, kernel_size, stride_size, padding_size, pool_type, ceil_mode, 2, 3);
-  } else if (layout == "NHWC") {
-    return pool_impl(x, kernel_size, stride_size, padding_size, pool_type, ceil_mode, 1, 2);
-  } else {
-    LOG(ERROR) << "Unsupported layout " << layout;
+  int height_idx = -1;
+  int width_idx = -1;
+  for (size_t i = 0; i < layout.size(); ++i) {
+    if (layout[i] == 'H') {
+      CHECK_EQ(height_idx, -1) << "Unsupported layout " << layout;
+      height_idx = i;
+    } else if (layout[i] == 'W') {
+      CHECK_EQ(width_idx, -1) << "Unsupported layout " << layout;
+      width_idx = i;
+    } else if (layout[i] == 'h' || layout[i] == 'w') {
+      // do not support split on height or width, e.g., NCHW16w
+      LOG(ERROR) << "Unsupported layout " << layout;
+    }
   }
+  return pool_impl(x, kernel_size, stride_size, padding_size,
+                   pool_type, ceil_mode, height_idx, width_idx);
 }
 
 /*!
