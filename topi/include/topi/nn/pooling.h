@@ -131,7 +131,7 @@ inline Tensor pool_impl(const Tensor& x,
 /*!
 * \brief Perform pooling on data
 *
-* \param x The input tensor in NCHW or NHWC order
+* \param x The input tensor in NCHW or NHWC, etc order
 * \param kernel_size Vector of two ints: {kernel_height, kernel_width}
 * \param stride_size Vector of two ints: {stride_height, stride_width}
 * \param padding_size Vector of two ints: {padding_height, padding_width}
@@ -139,7 +139,7 @@ inline Tensor pool_impl(const Tensor& x,
 * \param ceil_mode Whether to use ceil when calculating the output size
 * \param layout The input layout
 *
-* \return The output tensor in NCHW order
+* \return The output tensor in the same layout
 */
 
 inline Tensor pool(const Tensor& x,
@@ -149,8 +149,7 @@ inline Tensor pool(const Tensor& x,
                    PoolType pool_type,
                    bool ceil_mode,
                    const std::string& layout = "NCHW") {
-  int height_idx = -1;
-  int width_idx = -1;
+  int height_idx = -1, width_idx = -1;
   for (size_t i = 0; i < layout.size(); ++i) {
     if (layout[i] == 'H') {
       CHECK_EQ(height_idx, -1) << "Unsupported layout " << layout;
@@ -170,40 +169,64 @@ inline Tensor pool(const Tensor& x,
 /*!
 * \brief Perform global pooling on data in NCHW order
 *
-* \param x The input tensor in NCHW order
+* \param x The input tensor represent as layout
 * \param pool_type The type of pooling operator
+* \param layout The input layout
 *
-* \return The output tensor with shape [batch, channel, 1, 1]
+* \return The output tensor with same layout.
+*         for NCHW, the output shape will be [batch, channel, 1, 1]
 */
 inline Tensor global_pool(const Tensor& x,
-                          PoolType pool_type) {
-  CHECK_EQ(x->shape.size(), 4) << "Pooling input must be 4-D";
+                          PoolType pool_type,
+                          const std::string& layout = "NCHW") {
+  CHECK(x->shape.size() >= 2) << "Pooling input must >= 2-D (H, W)";
 
-  auto batch = x->shape[0];
-  auto channel = x->shape[1];
-  auto height = x->shape[2];
-  auto width = x->shape[3];
+  int height_idx = -1, width_idx = -1;
+  for (size_t i = 0; i < layout.size(); ++i) {
+    if (layout[i] == 'H') {
+      CHECK_EQ(height_idx, -1) << "Unsupported layout " << layout;
+      height_idx = i;
+    } else if (layout[i] == 'W') {
+      CHECK_EQ(width_idx, -1) << "Unsupported layout " << layout;
+      width_idx = i;
+    } else if (layout[i] == 'h' || layout[i] == 'w') {
+      // do not support split on height or width, e.g., NCHW16w
+      LOG(ERROR) << "Unsupported layout " << layout;
+    }
+  }
+
+  Array<Expr> out_shape = x->shape;
+  out_shape.Set(height_idx, 1);
+  out_shape.Set(width_idx, 1);
+
+  auto height = x->shape[height_idx];
+  auto width = x->shape[width_idx];
 
   auto dheight = tvm::reduce_axis(Range(0, height));
   auto dwidth = tvm::reduce_axis(Range(0, width));
 
   if (pool_type == kMaxPool) {
-    return tvm::compute(
-      { batch, channel, 1, 1 },
-      [&](Var n, Var c, Var h, Var w) {
-        return tvm::max(x(n, c, dheight, dwidth), { dheight, dwidth });  // NOLINT(*)
+    return tvm::compute(out_shape,
+      [&](const Array<Var>& output) {
+        Array<Expr> indices;
+        for (const Var& var : output) indices.push_back(var);
+        indices.Set(height_idx, dheight);
+        indices.Set(width_idx, dwidth);
+        return tvm::max(x(indices), { dheight, dwidth });  // NOLINT(*)
       }, "tensor", "global_pool_max");
   } else if (pool_type == kAvgPool) {
-    auto tsum = tvm::compute(
-      { batch, channel, 1, 1 },
-      [&](Var n, Var c, Var h, Var w) {
-        return tvm::sum(x(n, c, dheight, dwidth), { dheight, dwidth });
+    auto tsum = tvm::compute(out_shape,
+      [&](const Array<Var>& output) {
+        Array<Expr> indices;
+        for (const Var& var : output) indices.push_back(var);
+        indices.Set(height_idx, dheight);
+        indices.Set(width_idx, dwidth);
+        return tvm::sum(x(indices), { dheight, dwidth });
       }, "tensor", "global_pool_sum");
 
-    return tvm::compute(
-      { batch, channel, 1, 1 },
-      [&](Var n, Var c, Var h, Var w) {
-        return tsum(n, c, h, w) / tvm::cast(x->dtype, height * width);
+    return tvm::compute(out_shape,
+      [&](const Array<Var>& output) {
+        return tsum(output) / tvm::cast(x->dtype, height * width);
       }, "tensor", kElementWise);
   } else {
     LOG(ERROR) << "Unrecognized pool_type: " << pool_type;
