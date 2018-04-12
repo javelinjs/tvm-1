@@ -59,11 +59,6 @@ def schedule_conv2d_nChwc(num_filter, kernel_size, outs):
 
 
 @tvm.target.generic_func
-def schedule_conv2d_nchw_kernel_packed(num_filter, kernel_size, outs):
-    return _default_schedule(outs, False)
-
-
-@tvm.target.generic_func
 def schedule_conv2d_transpose_nchw(outs):
     """Schedule for conv2d_transpose_nchw
 
