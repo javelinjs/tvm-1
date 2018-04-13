@@ -32,9 +32,9 @@ void OpenCLWorkspace::GetAttr(
   }
   CHECK_LT(index, devices.size())
       << "Invalid device id " << index;
-  size_t value;
   switch (kind) {
     case kMaxThreadsPerBlock: {
+      size_t value;
       OPENCL_CALL(clGetDeviceInfo(
           devices[index],  CL_DEVICE_MAX_WORK_GROUP_SIZE,
           sizeof(size_t), &value, nullptr));
@@ -45,7 +45,23 @@ void OpenCLWorkspace::GetAttr(
       *rv = 1;
       break;
     }
+    case kMaxSharedMemoryPerBlock: {
+      cl_ulong value;
+      OPENCL_CALL(clGetDeviceInfo(
+          devices[index], CL_DEVICE_LOCAL_MEM_SIZE,
+          sizeof(cl_ulong), &value, nullptr));
+      *rv = static_cast<int64_t>(value);
+      break;
+    }
     case kComputeVersion: return;
+    case kDeviceName: {
+      char value[128] = {0};
+      OPENCL_CALL(clGetDeviceInfo(
+          devices[index], CL_DEVICE_NAME,
+          sizeof(value) - 1, value, nullptr));
+      *rv = std::string(value);
+      break;
+    }
     case kExist: break;
   }
 }
@@ -180,7 +196,7 @@ bool MatchPlatformInfo(
 
 void OpenCLWorkspace::Init() {
   if (initialized_) return;
-  std::lock_guard<std::mutex>(this->mu);
+  std::lock_guard<std::mutex> lock(this->mu);
   if (initialized_) return;
   initialized_ = true;
   if (context != nullptr) return;

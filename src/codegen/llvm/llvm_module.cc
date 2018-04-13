@@ -51,13 +51,7 @@ class LLVMModuleNode final : public runtime::ModuleNode {
     BackendPackedCFunc faddr =
         reinterpret_cast<BackendPackedCFunc>(GetFunctionAddr(fname));
     if (faddr == nullptr) return PackedFunc();
-    return PackedFunc([faddr, sptr_to_self](TVMArgs args, TVMRetValue* rv) {
-        int ret = (*faddr)(
-            (void*)args.values, // NOLINT(*)
-            (int*)args.type_codes, // NOLINT(*)
-            args.num_args);
-        CHECK_EQ(ret, 0) << TVMGetLastError();
-      });
+    return WrapPackedFunc(faddr, sptr_to_self);
   }
 
   void SaveToFile(const std::string& file_name,
@@ -68,7 +62,11 @@ class LLVMModuleNode final : public runtime::ModuleNode {
     CHECK_EQ(ecode.value(), 0) << "Cannot open file: " << file_name
                                << " " << ecode.message();
     if (fmt == "o" || fmt == "obj") {
+#if TVM_LLVM_VERSION <= 60
       std::unique_ptr<llvm::Module> m = llvm::CloneModule(mptr_);
+#else
+      std::unique_ptr<llvm::Module> m = llvm::CloneModule(*mptr_);
+#endif
       llvm::legacy::PassManager pass;
       CHECK(tm_);
       CHECK(tm_->addPassesToEmitFile(
@@ -76,7 +74,11 @@ class LLVMModuleNode final : public runtime::ModuleNode {
           << "Cannot emit target CGFT_ObjectFile";
       pass.run(*m);
     } else if (fmt == "s" || fmt == "asm") {
+#if TVM_LLVM_VERSION <= 60
       std::unique_ptr<llvm::Module> m = llvm::CloneModule(mptr_);
+#else
+      std::unique_ptr<llvm::Module> m = llvm::CloneModule(*mptr_);
+#endif
       llvm::legacy::PassManager pass;
       CHECK(tm_);
       CHECK(tm_->addPassesToEmitFile(
@@ -86,7 +88,11 @@ class LLVMModuleNode final : public runtime::ModuleNode {
     } else if (fmt == "ll") {
       mptr_->print(dest, nullptr);
     } else if (fmt == "bc") {
+#if TVM_LLVM_VERSION <= 60
       llvm::WriteBitcodeToFile(mptr_, dest);
+#else
+      llvm::WriteBitcodeToFile(*mptr_, dest);
+#endif
     } else {
       LOG(FATAL) << "Do not know how to save file "
                  << file_name << " with format=\'"<< format << "\'";

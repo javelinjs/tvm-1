@@ -51,6 +51,13 @@ void VulkanWorkspace::GetAttr(
       *rv = value;
       break;
     }
+    case kMaxSharedMemoryPerBlock: {
+      VkPhysicalDeviceProperties phy_prop;
+      vkGetPhysicalDeviceProperties(context_[ctx.device_id].phy_device, &phy_prop);
+      int64_t value = phy_prop.limits.maxComputeSharedMemorySize;
+      *rv = value;
+      break;
+    }
     case kWarpSize: {
       *rv = 1;
       break;
@@ -66,6 +73,7 @@ void VulkanWorkspace::GetAttr(
       *rv = os.str();
       break;
     }
+    case kDeviceName: return;
     case kExist: break;
   }
 }
@@ -650,7 +658,7 @@ std::vector<VulkanContext> GetContext(VkInstance instance) {
 
 void VulkanWorkspace::Init() {
   if (initialized_) return;
-  std::lock_guard<std::mutex>(this->mu);
+  std::lock_guard<std::mutex> lock(this->mu);
   if (initialized_) return;
   initialized_ = true;
   instance_ = CreateInstance();

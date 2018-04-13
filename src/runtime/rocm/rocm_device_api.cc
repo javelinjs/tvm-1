@@ -44,12 +44,14 @@ class ROCMDeviceAPI final : public DeviceAPI {
         value = 64;
         break;
       }
+      case kMaxSharedMemoryPerBlock: return;
       case kComputeVersion: {
         hipDeviceProp_t prop;
         ROCM_CALL(hipGetDeviceProperties(&prop, ctx.device_id));
         *rv = prop.gcnArch;
         return;
       }
+      case kDeviceName: return;
     }
     *rv = value;
   }

@@ -8,8 +8,8 @@ import warnings
 import types
 
 from ._ffi.node import NodeBase, register_node
-from ._ffi.base import _RUNTIME_ONLY
 from . import api
+from . import _api_internal
 from . import tensor
 from . import schedule
 from . import expr
@@ -46,7 +46,8 @@ class DumpIR(object):
             retv = func(*args, **kwargs)
             if not isinstance(retv, (_stmt.Stmt, container.LoweredFunc, container.Array)):
                 return retv
-            pname = str(self._pass_id) + "_" + func.func_name + "_ir.cc"
+            fname = func.func_name if hasattr(func, 'func_name') else func.__name__
+            pname = str(self._pass_id) + "_" + fname + "_ir.cc"
             with open(pname, "a") as f:
                 out = retv.body if isinstance(retv, container.LoweredFunc) else retv
                 f.write(str(out))
@@ -70,20 +71,20 @@ class DumpIR(object):
             self._recover_list.append(recover)
             vset[k] = self.decorate(v) if isinstance(v, types.FunctionType) else v
 
-    def decorate_custompass(self):
-        """ decorate add_lower_pass pass in BuildConfig"""
-        cfg = BuildConfig.current
-        self._old_custom_pass = cfg.add_lower_pass
-        custom_pass = cfg.add_lower_pass if cfg.add_lower_pass else []
-        pass_list = [(x[0], self.decorate(x[1])) for x in custom_pass]
-        BuildConfig.current.add_lower_pass = pass_list
+    def decorate_custompass(self, custom_pass):
+        """decorate given list of custom passes, and return decorated passes"""
+        custom_pass = custom_pass if custom_pass else []
+        pass_list = []
+        for idx, x in enumerate(custom_pass):
+            x[1].__name__ = "custom{}_phase{}".format(idx, x[0])
+            pass_list += [(x[0], self.decorate(x[1]))]
+        return pass_list
 
     def enter(self):
         """only decorate outermost nest"""
         if DumpIR.scope_level > 0:
             return
         self.decorate_irpass()
-        self.decorate_custompass()
         self._pass_id = 0
         DumpIR.scope_level += 1
 
@@ -95,7 +96,6 @@ class DumpIR(object):
         for f in self._recover_list:
             f()
         schedule.ScheduleOps = self._old_sgpass
-        BuildConfig.current.add_lower_pass = self._old_custom_pass
         DumpIR.scope_level -= 1
 
 @register_node
@@ -113,7 +113,6 @@ class BuildConfig(NodeBase):
     is constructed. See _node_defaults for the fields.
     """
 
-    current = None
     _node_defaults = {
         "auto_unroll_max_step": 0,
         "auto_unroll_max_depth": 8,
@@ -124,8 +123,10 @@ class BuildConfig(NodeBase):
         "offset_factor": 0,
         "data_alignment": -1,
         "restricted_func": True,
-        "double_buffer_split_loop": 1
+        "double_buffer_split_loop": 1,
+        "dump_pass_ir": False
     }
+    _dump_ir = DumpIR()
 
     # pylint: disable=no-member
     def __init__(self, handle):
@@ -138,30 +139,47 @@ class BuildConfig(NodeBase):
         """
         super(BuildConfig, self).__init__(handle)
         self.handle = handle
-        self._old_scope = None
-        self._dump_ir = DumpIR()
-        self.dump_pass_ir = False
-        self.add_lower_pass = None
+
+    @property
+    def add_lower_pass(self):
+        size = _api_internal._BuildConfigGetAddLowerPassInfo(self)
+        result = []
+        for i in range(size):
+            phase = _api_internal._BuildConfigGetAddLowerPassInfo(self, i, True)
+            func = _api_internal._BuildConfigGetAddLowerPassInfo(self, i, False)
+            result += [(phase, func)]
+        return result
+
+    @add_lower_pass.setter
+    def add_lower_pass(self, value):
+        add_lower_pass_args = []
+        for x in value:
+            add_lower_pass_args += [x[0], x[1]]
+        _api_internal._BuildConfigSetAddLowerPass(self, *add_lower_pass_args)
 
     def __enter__(self):
         # pylint: disable=protected-access
-        self._old_scope = BuildConfig.current
-        BuildConfig.current = self
-        if self.dump_pass_ir is True:
-            self._dump_ir.enter()
+        _api_internal._EnterBuildConfigScope(self)
+        if self.dump_pass_ir:
+            BuildConfig._dump_ir.enter()
         return self
 
     def __exit__(self, ptype, value, trace):
-        assert self._old_scope
-        if self.dump_pass_ir is True:
-            self._dump_ir.exit()
-        BuildConfig.current = self._old_scope
+        if self.dump_pass_ir:
+            BuildConfig._dump_ir.exit()
+        _api_internal._ExitBuildConfigScope()
 
     def __setattr__(self, name, value):
         if name in BuildConfig._node_defaults:
             raise AttributeError(
                 "'%s' object cannot set attribute '%s'" % (str(type(self)), name))
         return super(BuildConfig, self).__setattr__(name, value)
+
+
+def current_build_config():
+    """Get the current build configuration."""
+    return _api_internal._GetCurrentBuildConfig()
+
 
 def build_config(**kwargs):
     """Configure the build behavior by setting config variables.
@@ -172,7 +190,7 @@ def build_config(**kwargs):
         Threshold of number of steps in the loop to be automatically unrolled.
         This takes inner loop count into consideration.
 
-    auto_unroll_max_depth: int, default=4
+    auto_unroll_max_depth: int, default=8
         The maximum nested level of loops that can be automatically unrolled.
 
     unroll_explicit: bool, default=True
@@ -206,7 +224,7 @@ def build_config(**kwargs):
         It it is bigger than one, the logic will do a split with factor equals the integer
         and unroll the inner loop. This allows the buffer fetching won't contain condition.
 
-    add_lower_pass: list of tuiple (phase, function(Stmt->Stmt)), default=None
+    add_lower_pass: list of tuple (phase, function(Stmt->Stmt)), default=None
         phase contains an integer on which optimization pass we apply the pass.
         Additional lowering passes to be applied before make_api.
 
@@ -221,14 +239,10 @@ def build_config(**kwargs):
                  for k, v in BuildConfig._node_defaults.items()}
     config = make.node("BuildConfig", **node_args)
 
-    for k in kwargs:
-        if not k in node_args:
-            setattr(config, k, kwargs[k])
-    return config
+    if "add_lower_pass" in kwargs:
+        config.add_lower_pass = kwargs["add_lower_pass"]
 
-if not _RUNTIME_ONLY:
-    # BuildConfig is not available in tvm_runtime
-    BuildConfig.current = build_config()
+    return config
 
 def get_binds(args, binds=None):
     """Internal function to get binds and arg_list given arguments.
@@ -252,7 +266,7 @@ def get_binds(args, binds=None):
         The list of symbolic buffers of arguments.
     """
     binds = {} if binds is None else binds.copy()
-    cfg = BuildConfig.current
+    cfg = current_build_config()
     arg_list = []
     for x in args:
         if isinstance(x, tensor.Tensor):
@@ -309,8 +323,10 @@ def lower(sch,
        Then the Stmt before make api is returned.
     """
     binds, arg_list = get_binds(args, binds)
-    cfg = BuildConfig.current
+    cfg = current_build_config()
     add_lower_pass = cfg.add_lower_pass if cfg.add_lower_pass else []
+    if cfg.dump_pass_ir:
+        add_lower_pass = BuildConfig._dump_ir.decorate_custompass(add_lower_pass)
     lower_phase0 = [x[1] for x in add_lower_pass if x[0] == 0]
     lower_phase1 = [x[1] for x in add_lower_pass if x[0] == 1]
     lower_phase2 = [x[1] for x in add_lower_pass if x[0] == 2]
@@ -424,12 +440,17 @@ def build(sch,
 
     target = _target.current_target() if target is None else target
     target = _target.create(target) if target else _target.create("llvm")
+    device_type = ndarray.context(target.target_name, 0).device_type
 
     fhost = []
     fdevice = []
     for func in flist:
+        if not ir_pass.VerifyMemory(func, device_type):
+            raise ValueError(
+                "Direct host side access to device memory is detected in %s. "
+                "Did you forget to bind?" % func.name)
         if func.func_type == container.LoweredFunc.MixedFunc:
-            if BuildConfig.current.detect_global_barrier:
+            if current_build_config().detect_global_barrier:
                 func = ir_pass.ThreadSync(func, "global")
             func = ir_pass.ThreadSync(func, "shared")
             warp_size = target.thread_warp_size
@@ -445,11 +466,14 @@ def build(sch,
         else:
             raise ValueError("unknown function type %d" % func.func_type)
 
+    for i, func in enumerate(fdevice):
+        warp_size = target.thread_warp_size
+        fdevice[i] = ir_pass.LowerWarpMemory(func, warp_size)
+
     if "gpu" in target.keys and not fdevice:
         warnings.warn(
             "Specified target %s, but cannot find device code, did you do bind?" % target)
 
-    device_type = ndarray.context(target.target_name, 0).device_type
     fhost = [ir_pass.BindDeviceType(x, device_type) for x in fhost]
     fhost = [ir_pass.LowerTVMBuiltin(x) for x in fhost]
 
