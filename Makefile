@@ -24,9 +24,9 @@ UNAME_S := $(shell uname -s)
 
 # The flags
 LLVM_CFLAGS= -fno-rtti -DDMLC_ENABLE_RTTI=0 -DDMLC_USE_FOPEN64=0
-LDFLAGS = -pthread -lm -ldl -fopenmp
+LDFLAGS = -pthread -lm -ldl
 INCLUDE_FLAGS = -Iinclude -I$(DLPACK_PATH)/include -I$(DMLC_CORE_PATH)/include -IHalideIR/src -Itopi/include
-CFLAGS = -std=c++11 -Wall -O2 $(INCLUDE_FLAGS) -fPIC -fopenmp
+CFLAGS = -std=c++11 -Wall -O2 $(INCLUDE_FLAGS) -fPIC
 PKG_LDFLAGS =
 FRAMEWORKS =
 OBJCFLAGS = -fno-objc-arc
@@ -58,6 +58,7 @@ ROCM_SRC = $(wildcard src/runtime/rocm/*.cc)
 OPENCL_SRC = $(wildcard src/runtime/opencl/*.cc)
 OPENGL_SRC = $(wildcard src/runtime/opengl/*.cc)
 VULKAN_SRC = $(wildcard src/runtime/vulkan/*.cc)
+SGX_SRC = $(wildcard src/runtime/sgx/untrusted/*.cc)
 RPC_SRC = $(wildcard src/runtime/rpc/*.cc)
 GRAPH_SRC = $(wildcard src/runtime/graph/*.cc)
 RUNTIME_SRC = $(wildcard src/runtime/*.cc)
@@ -72,6 +73,7 @@ ROCM_OBJ = $(patsubst src/%.cc, build/%.o, $(ROCM_SRC))
 OPENCL_OBJ = $(patsubst src/%.cc, build/%.o, $(OPENCL_SRC))
 OPENGL_OBJ = $(patsubst src/%.cc, build/%.o, $(OPENGL_SRC))
 VULKAN_OBJ = $(patsubst src/%.cc, build/%.o, $(VULKAN_SRC))
+SGX_OBJ = $(patsubst src/%.cc, build/%.o, $(SGX_SRC)) build/runtime/sgx/untrusted/tvm_u.o
 RPC_OBJ = $(patsubst src/%.cc, build/%.o, $(RPC_SRC))
 GRAPH_OBJ = $(patsubst src/%.cc, build/%.o, $(GRAPH_SRC))
 CC_OBJ = $(patsubst src/%.cc, build/%.o, $(CC_SRC)) $(LLVM_OBJ)
@@ -128,6 +130,10 @@ ifeq ($(USE_OPENCL), 1)
 		LDFLAGS += -lOpenCL
 	endif
 	RUNTIME_DEP += $(OPENCL_OBJ)
+ifdef OPENCL_PATH
+        CFLAGS += -I$(OPENCL_PATH)/include
+        LDFLAGS += -L$(OPENCL_PATH)/lib
+endif
 else
 	CFLAGS += -DTVM_OPENCL_RUNTIME=0
 endif
@@ -166,6 +172,20 @@ ifeq ($(USE_METAL), 1)
 	FRAMEWORKS += -framework Metal -framework Foundation
 else
 	CFLAGS += -DTVM_METAL_RUNTIME=0
+endif
+
+ifeq ($(USE_SGX), 1)
+	EDGER8R = $(SGX_SDK)/bin/x64/sgx_edger8r
+	ifneq ($(SGX_MODE), HW)
+		sgx_sim := _sim
+	endif
+	urts_library_name := sgx_urts$(sgx_sim)
+	CFLAGS += -DTVM_SGX_RUNTIME=1
+	SGX_CFLAGS = -include "build/runtime/sgx/untrusted/tvm_u.h" -I$(SGX_SDK)/include
+	LDFLAGS += -L$(SGX_SDK)/lib64 -l$(urts_library_name)
+	RUNTIME_DEP += $(SGX_OBJ)
+else
+	CFLAGS += -DTVM_SGX_RUNTIME=0
 endif
 
 ifeq ($(USE_RPC), 1)
@@ -250,6 +270,21 @@ build/runtime/metal/%.o: src/runtime/metal/%.mm
 	$(CXX) $(OBJCFLAGS) $(CFLAGS) -MM -MT build/runtime/metal/$*.o $< >build/runtime/metal/$*.d
 	$(CXX) $(OBJCFLAGS) -c $(CFLAGS) -c $< -o $@
 
+build/runtime/sgx/untrusted/tvm_u.h: src/runtime/sgx/tvm.edl
+	@mkdir -p $(@D)
+	$(EDGER8R) $< --untrusted --untrusted-dir $(@D) --search-path $(SGX_SDK)/include
+	mv $@ $@.in
+	awk 'NR==4{print "#include <tvm/runtime/c_runtime_api.h>"}1' $@.in > $@
+
+build/runtime/sgx/untrusted/tvm_u.c: build/runtime/sgx/untrusted/tvm_u.h
+
+build/runtime/sgx/untrusted/tvm_u.o: build/runtime/sgx/untrusted/tvm_u.c
+	$(CC) $(CFLAGS) $(SGX_CFLAGS) -c $< -o $@
+
+build/runtime/sgx/untrusted/%.o: src/runtime/sgx/untrusted/%.cc build/runtime/sgx/untrusted/tvm_u.h
+	$(CXX) $(CFLAGS) $(SGX_CFLAGS) -MM -MT build/$*.o $< >build/$*.d
+	$(CXX) -c $(CFLAGS) $(SGX_CFLAGS) -c $< -o $@
+
 build/%.o: src/%.cc
 	@mkdir -p $(@D)
 	$(CXX) $(CFLAGS) -MM -MT build/$*.o $< >build/$*.d
@@ -276,7 +311,7 @@ lib/libtvm_runtime.${SHARED_LIBRARY_SUFFIX}: $(RUNTIME_DEP)
 lib/libtvm_web_runtime.bc: web/web_runtime.cc
 	@mkdir -p build/web
 	@mkdir -p $(@D)
-	$(CXX) $(CFLAGS) -MM -MT lib/libtvm_web_runtime.bc $< >build/web/web_runtime.d
+	emcc $(EMCC_FLAGS) -MM -MT lib/libtvm_web_runtime.bc $< >build/web/web_runtime.d
 	emcc $(EMCC_FLAGS) -o $@ web/web_runtime.cc
 
 lib/libtvm_web_runtime.js: lib/libtvm_web_runtime.bc
