@@ -96,8 +96,11 @@ inline Tensor pool_impl(const Tensor& x,
   out_shape.Set(height_idx, out_height);
   out_shape.Set(width_idx, out_width);
 
+  const auto padding_h = *(HalideIR::Internal::as_const_int(padding_height));
+  const auto padding_w = *(HalideIR::Internal::as_const_int(padding_width));
+
   if (pool_type == kMaxPool) {
-    auto temp = (padding_height > 0 || padding_width > 0) ?
+    auto temp = (padding_h > 0 || padding_w > 0) ?
                 pad(x, pad_before, pad_after, x->dtype.min(), "pad_temp") : x;
     return tvm::compute(out_shape,
     [&](const Array<Var>& output) {
@@ -108,7 +111,7 @@ inline Tensor pool_impl(const Tensor& x,
       return tvm::max(temp(indices), { dheight, dwidth });
     }, "tensor", "pool_max");
   } else if (pool_type == kAvgPool) {
-    auto temp = (padding_height > 0 || padding_width > 0) ?
+    auto temp = (padding_h  > 0 || padding_w > 0) ?
                 pad(x, pad_before, pad_after, 0, "pad_temp") : x;
 
     auto tsum = tvm::compute(out_shape,
