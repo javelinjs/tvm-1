@@ -31,7 +31,6 @@ def schedule_injective(outs):
         n, C, h, w, c = s[x].op.axis
         fused = s[x].fuse(n, C, h)
         s[x].parallel(fused)
-        s[x].vectorize(c)
     else:
         s[x].parallel(s[x].op.axis[0])
     return s
