@@ -128,6 +128,31 @@ inline Tensor pool_impl(const Tensor& x,
   }
 }
 
+inline bool find_height_width(const std::string& layout,
+                              int* height_idx,
+                              int* width_idx) {
+  *height_idx = -1, *width_idx = -1;
+  int curr_idx = 0;
+  for (size_t i = 0; i < layout.size(); ++i) {
+    if ((layout[i] >= 'A' && layout[i] <= 'Z') ||
+        (layout[i] >= 'a' && layout[i] <= 'z')) {
+      curr_idx = i;
+      if (layout[i] == 'H') {
+        if (*height_idx != -1) return false;
+        *height_idx = curr_idx;
+      } else if (layout[i] == 'W') {
+        if (*width_idx != -1) return false;
+        *width_idx = curr_idx;
+      } else if (layout[i] == 'h' || layout[i] == 'w') {
+        // do not support split on height or width, e.g., NCHW16w
+        return false;
+      }
+    }
+  }
+  if (*height_idx == -1 || *width_idx == -1) return false;
+  return true;
+}
+
 /*!
 * \brief Perform pooling on data
 *
@@ -150,18 +175,8 @@ inline Tensor pool(const Tensor& x,
                    bool ceil_mode,
                    const std::string& layout = "NCHW") {
   int height_idx = -1, width_idx = -1;
-  for (size_t i = 0; i < layout.size(); ++i) {
-    if (layout[i] == 'H') {
-      CHECK_EQ(height_idx, -1) << "Unsupported layout " << layout;
-      height_idx = i;
-    } else if (layout[i] == 'W') {
-      CHECK_EQ(width_idx, -1) << "Unsupported layout " << layout;
-      width_idx = i;
-    } else if (layout[i] == 'h' || layout[i] == 'w') {
-      // do not support split on height or width, e.g., NCHW16w
-      LOG(ERROR) << "Unsupported layout " << layout;
-    }
-  }
+  CHECK(find_height_width(layout, &height_idx, &width_idx))
+    << "Unsupported layout " << layout;
   return pool_impl(x, kernel_size, stride_size, padding_size,
                    pool_type, ceil_mode, height_idx, width_idx);
 }
@@ -182,18 +197,8 @@ inline Tensor global_pool(const Tensor& x,
   CHECK(x->shape.size() >= 2) << "Pooling input must >= 2-D (H, W)";
 
   int height_idx = -1, width_idx = -1;
-  for (size_t i = 0; i < layout.size(); ++i) {
-    if (layout[i] == 'H') {
-      CHECK_EQ(height_idx, -1) << "Unsupported layout " << layout;
-      height_idx = i;
-    } else if (layout[i] == 'W') {
-      CHECK_EQ(width_idx, -1) << "Unsupported layout " << layout;
-      width_idx = i;
-    } else if (layout[i] == 'h' || layout[i] == 'w') {
-      // do not support split on height or width, e.g., NCHW16w
-      LOG(ERROR) << "Unsupported layout " << layout;
-    }
-  }
+  CHECK(find_height_width(layout, &height_idx, &width_idx))
+    << "Unsupported layout " << layout;
 
   Array<Expr> out_shape = x->shape;
   out_shape.Set(height_idx, 1);
