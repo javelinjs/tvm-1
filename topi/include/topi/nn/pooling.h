@@ -136,7 +136,6 @@ inline bool find_height_width(const std::string& layout,
   for (size_t i = 0; i < layout.size(); ++i) {
     if ((layout[i] >= 'A' && layout[i] <= 'Z') ||
         (layout[i] >= 'a' && layout[i] <= 'z')) {
-      curr_idx = i;
       if (layout[i] == 'H') {
         if (*height_idx != -1) return false;
         *height_idx = curr_idx;
@@ -147,6 +146,7 @@ inline bool find_height_width(const std::string& layout,
         // do not support split on height or width, e.g., NCHW16w
         return false;
       }
+      ++curr_idx;
     }
   }
   if (*height_idx == -1 || *width_idx == -1) return false;
