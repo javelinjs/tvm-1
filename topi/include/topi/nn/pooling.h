@@ -85,9 +85,9 @@ inline Tensor pool_impl(const Tensor& x,
   pad_after.Set(width_idx, pad_right);
 
   auto out_height = tvm::ir::Simplify(
-  (height - kernel_height + pad_top + pad_down) / stride_height + 1);
+    (height - kernel_height + pad_top + pad_down) / stride_height + 1);
   auto out_width = tvm::ir::Simplify(
-  (width - kernel_width + pad_left + pad_right) / stride_width + 1);
+    (width - kernel_width + pad_left + pad_right) / stride_width + 1);
 
   auto dheight = tvm::reduce_axis(Range(0, kernel_height));
   auto dwidth = tvm::reduce_axis(Range(0, kernel_width));
