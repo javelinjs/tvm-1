@@ -101,7 +101,7 @@ inline Tensor pool_impl(const Tensor& x,
 
   if (pool_type == kMaxPool) {
     auto temp = (padding_h > 0 || padding_w > 0) ?
-                pad(x, pad_before, pad_after, x->dtype.min(), "pad_temp") : x;
+                pad(x, pad_before, pad_after, x->dtype.min(), "pad_temp", "pool_pad") : x;
     return tvm::compute(out_shape,
     [&](const Array<Var>& output) {
       Array<Expr> indices;
@@ -112,7 +112,7 @@ inline Tensor pool_impl(const Tensor& x,
     }, "tensor", "pool_max");
   } else if (pool_type == kAvgPool) {
     auto temp = (padding_h  > 0 || padding_w > 0) ?
-                pad(x, pad_before, pad_after, 0, "pad_temp") : x;
+                pad(x, pad_before, pad_after, 0, "pad_temp", "pool_pad") : x;
 
     auto tsum = tvm::compute(out_shape,
     [&](const Array<Var>& output) {
