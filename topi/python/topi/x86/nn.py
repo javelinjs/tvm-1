@@ -17,6 +17,10 @@ def _default_schedule(outs, auto_inline):
         n, c, _, _ = s[x].op.axis
         fused = s[x].fuse(n, c) # for nhwc layout, fuse n and h
         s[x].parallel(fused)
+    elif len(s[x].op.axis) == 5:
+        n, C, h, _, _ = s[x].op.axis
+        fused = s[x].fuse(n, C, h)
+        s[x].parallel(fused)
     else:
         s[x].parallel(s[x].op.axis[0])
     return s
@@ -55,7 +59,81 @@ def schedule_pool(outs):
     sch: Schedule
         The computation schedule for the op.
     """
-    return _default_schedule(outs, False)
+    print('in x86/nn pool schedule')
+    # return _default_schedule(outs, False)
+    outs = [outs] if isinstance(outs, tvm.tensor.Tensor) else outs
+    s = tvm.create_schedule([x.op for x in outs])
+
+    def traverse(op):
+        """Traverse operators from computation graph"""
+        # inline all one-to-one-mapping operators except the last stage (output)
+        if tag.is_broadcast(op.tag):
+            if op not in s.outputs:
+                s[op].compute_inline()
+            for tensor in op.input_tensors:
+                if tensor.op.input_tensors:
+                    traverse(tensor.op)
+
+        print('in x86/nn pool schedule tag: ' + str(op.tag))
+        if 'pad' in op.tag or 'pool' in op.tag:
+            P = op.output(0)
+            if len(P.op.axis) == 5:
+                batch, C, h, _, c = P.op.axis
+                fused = s[P].fuse(batch, C, h)
+                s[P].vectorize(c)
+            else:
+                batch, c, h, w = P.op.axis
+                fused = s[P].fuse(batch, c)
+            s[P].parallel(fused)
+
+    traverse(outs[0].op)
+    return s
+
+
+@generic.schedule_global_pool.register(["cpu"])
+def schedule_global_pool(outs):
+    """Schedule for global pool
+
+    Parameters
+    ----------
+    outs: Array of Tensor
+          The computation graph description of pool
+          in the format of an array of tensors.
+
+    Returns
+    -------
+    sch: Schedule
+        The computation schedule for the op.
+    """
+    print('in x86/nn global-pool schedule')
+    # return _default_schedule(outs, False)
+    outs = [outs] if isinstance(outs, tvm.tensor.Tensor) else outs
+    s = tvm.create_schedule([x.op for x in outs])
+
+    def traverse(op):
+        """Traverse operators from computation graph"""
+        # inline all one-to-one-mapping operators except the last stage (output)
+        if tag.is_broadcast(op.tag):
+            if op not in s.outputs:
+                s[op].compute_inline()
+            for tensor in op.input_tensors:
+                if tensor.op.input_tensors:
+                    traverse(tensor.op)
+
+        print('in x86/nn global-pool schedule tag: ' + str(op.tag))
+        if 'pad' in op.tag or 'pool' in op.tag:
+            P = op.output(0)
+            if len(P.op.axis) == 5:
+                batch, C, h, _, c = P.op.axis
+                fused = s[P].fuse(batch, C, h)
+                s[P].vectorize(c)
+            else:
+                batch, c, h, w = P.op.axis
+                fused = s[P].fuse(batch, c)
+            s[P].parallel(fused)
+
+    traverse(outs[0].op)
+    return s
 
 
 @generic.schedule_dense.register(["cpu"])
