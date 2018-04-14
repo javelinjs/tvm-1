@@ -59,8 +59,6 @@ def schedule_pool(outs):
     sch: Schedule
         The computation schedule for the op.
     """
-    print('in x86/nn pool schedule')
-    # return _default_schedule(outs, False)
     outs = [outs] if isinstance(outs, tvm.tensor.Tensor) else outs
     s = tvm.create_schedule([x.op for x in outs])
 
@@ -73,8 +71,6 @@ def schedule_pool(outs):
             for tensor in op.input_tensors:
                 if tensor.op.input_tensors:
                     traverse(tensor.op)
-
-        print('in x86/nn pool schedule tag: ' + str(op.tag))
         if 'pad' in op.tag or 'pool' in op.tag:
             P = op.output(0)
             if len(P.op.axis) == 5:
@@ -105,8 +101,6 @@ def schedule_global_pool(outs):
     sch: Schedule
         The computation schedule for the op.
     """
-    print('in x86/nn global-pool schedule')
-    # return _default_schedule(outs, False)
     outs = [outs] if isinstance(outs, tvm.tensor.Tensor) else outs
     s = tvm.create_schedule([x.op for x in outs])
 
@@ -119,8 +113,6 @@ def schedule_global_pool(outs):
             for tensor in op.input_tensors:
                 if tensor.op.input_tensors:
                     traverse(tensor.op)
-
-        print('in x86/nn global-pool schedule tag: ' + str(op.tag))
         if 'pad' in op.tag or 'pool' in op.tag:
             P = op.output(0)
             if len(P.op.axis) == 5:
