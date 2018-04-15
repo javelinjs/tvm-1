@@ -54,6 +54,13 @@ void AutoInlineElemWise(Schedule sch);
  */
 EXPORT void AutoInlineInjective(Schedule sch);
 
+/*!
+ * \brief To automatically inline the broadcast operations.
+ *
+ * \param sch The schedule to be inlined.
+ */
+void AutoInlineBroadcast(Schedule sch);
+
 }  // namespace schedule
 }  // namespace tvm
 #endif  // TVM_SCHEDULE_PASS_H_

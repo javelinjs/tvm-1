@@ -24,6 +24,11 @@ TVM_REGISTER_API("schedule.AutoInlineInjective")
     AutoInlineInjective(args[0]);
   });
 
+TVM_REGISTER_API("schedule.AutoInlineBroadcast")
+.set_body([](TVMArgs args, TVMRetValue* ret) {
+    AutoInlineBroadcast(args[0]);
+  });
+
 TVM_REGISTER_API("schedule.ScheduleOps")
 .set_body([](TVMArgs args, TVMRetValue* ret) {
   if (args.size() == 2)

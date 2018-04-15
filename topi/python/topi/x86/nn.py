@@ -41,8 +41,26 @@ def schedule_softmax(outs):
     sch: Schedule
         The computation schedule for the op.
     """
-    return _default_schedule(outs, False)
-
+    outs = [outs] if isinstance(outs, tvm.tensor.Tensor) else outs
+    x = outs[0]
+    s = tvm.create_schedule([x.op for x in outs])
+    tvm.schedule.AutoInlineInjective(s)
+    if len(s[x].op.axis) == 4:
+        n, c, _, _ = s[x].op.axis
+        fused = s[x].fuse(n, c) # for nhwc layout, fuse n and h
+        s[x].parallel(fused)
+    elif len(s[x].op.axis) == 5:
+        n, C, h, w, c = s[x].op.axis
+        fused = s[x].fuse(n, C, h)
+        s[x].parallel(fused)
+        s[x].vectorize(c)
+    elif len(s[x].op.axis) == 3:
+        n, c, _ = s[x].op.axis
+        fused = s[x].fuse(n, c)
+        s[x].parallel(fused)
+    else:
+        s[x].parallel(s[x].op.axis[0])
+    return s
 
 @generic.schedule_pool.register(["cpu"])
 def schedule_pool(outs):
@@ -60,29 +78,20 @@ def schedule_pool(outs):
         The computation schedule for the op.
     """
     outs = [outs] if isinstance(outs, tvm.tensor.Tensor) else outs
+    x = outs[0]
     s = tvm.create_schedule([x.op for x in outs])
-
-    def traverse(op):
-        """Traverse operators from computation graph"""
-        # inline all one-to-one-mapping operators except the last stage (output)
-        if tag.is_broadcast(op.tag):
-            if op not in s.outputs:
-                s[op].compute_inline()
-            for tensor in op.input_tensors:
-                if tensor.op.input_tensors:
-                    traverse(tensor.op)
-        if 'pad' in op.tag or 'pool' in op.tag:
-            P = op.output(0)
-            if len(P.op.axis) == 5:
-                batch, C, h, _, c = P.op.axis
-                fused = s[P].fuse(batch, C, h)
-                s[P].vectorize(c)
-            else:
-                batch, c, h, w = P.op.axis
-                fused = s[P].fuse(batch, c)
-            s[P].parallel(fused)
-
-    traverse(outs[0].op)
+    tvm.schedule.AutoInlineInjective(s)
+    if len(s[x].op.axis) == 4:
+        n, c, _, _ = s[x].op.axis
+        fused = s[x].fuse(n, c) # for nhwc layout, fuse n and h
+        s[x].parallel(fused)
+    elif len(s[x].op.axis) == 5:
+        n, C, h, w, c = s[x].op.axis
+        fused = s[x].fuse(n, C, h)
+        s[x].parallel(fused)
+        s[x].vectorize(c)
+    else:
+        s[x].parallel(s[x].op.axis[0])
     return s
 
 
@@ -102,31 +111,21 @@ def schedule_global_pool(outs):
         The computation schedule for the op.
     """
     outs = [outs] if isinstance(outs, tvm.tensor.Tensor) else outs
+    x = outs[0]
     s = tvm.create_schedule([x.op for x in outs])
-
-    def traverse(op):
-        """Traverse operators from computation graph"""
-        # inline all one-to-one-mapping operators except the last stage (output)
-        if tag.is_broadcast(op.tag):
-            if op not in s.outputs:
-                s[op].compute_inline()
-            for tensor in op.input_tensors:
-                if tensor.op.input_tensors:
-                    traverse(tensor.op)
-        if 'pad' in op.tag or 'pool' in op.tag:
-            P = op.output(0)
-            if len(P.op.axis) == 5:
-                batch, C, h, _, c = P.op.axis
-                fused = s[P].fuse(batch, C, h)
-                s[P].vectorize(c)
-            else:
-                batch, c, h, w = P.op.axis
-                fused = s[P].fuse(batch, c)
-            s[P].parallel(fused)
-
-    traverse(outs[0].op)
+    tvm.schedule.AutoInlineInjective(s)
+    if len(s[x].op.axis) == 4:
+        n, c, _, _ = s[x].op.axis
+        fused = s[x].fuse(n, c) # for nhwc layout, fuse n and h
+        s[x].parallel(fused)
+    elif len(s[x].op.axis) == 5:
+        n, C, h, w, c = s[x].op.axis
+        fused = s[x].fuse(n, C, h)
+        s[x].parallel(fused)
+        s[x].vectorize(c)
+    else:
+        s[x].parallel(s[x].op.axis[0])
     return s
-
 
 @generic.schedule_dense.register(["cpu"])
 def schedule_dense(outs):
