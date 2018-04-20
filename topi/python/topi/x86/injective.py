@@ -27,11 +27,12 @@ def schedule_injective(outs):
         n, c, _, _ = s[x].op.axis
         fused = s[x].fuse(n, c) # for nhwc layout, fuse n and h
         s[x].parallel(fused)
-    elif len(s[x].op.axis) == 5:
-        n, C, h, w, c = s[x].op.axis
-        fused = s[x].fuse(n, C, h)
+    elif len(s[x].op.axis) >= 5:
+        fused = s[x].fuse(s[x].op.axis[0], s[x].op.axis[1], s[x].op.axis[2])
         s[x].parallel(fused)
-        s[x].vectorize(c)
+    elif len(s[x].op.axis) == 3:
+        fused = s[x].fuse(s[x].op.axis[0], s[x].op.axis[1])
+        s[x].parallel(fused)
     else:
         s[x].parallel(s[x].op.axis[0])
     return s
