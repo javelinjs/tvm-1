@@ -23,14 +23,10 @@ def schedule_injective(outs):
     x = outs[0]
     s = tvm.create_schedule([x.op for x in outs])
     tvm.schedule.AutoInlineInjective(s)
-    if len(s[x].op.axis) == 4:
-        n, c, _, _ = s[x].op.axis
-        fused = s[x].fuse(n, c) # for nhwc layout, fuse n and h
-        s[x].parallel(fused)
-    elif len(s[x].op.axis) >= 5:
+    if len(s[x].op.axis) >= 5:
         fused = s[x].fuse(s[x].op.axis[0], s[x].op.axis[1], s[x].op.axis[2])
         s[x].parallel(fused)
-    elif len(s[x].op.axis) == 3:
+    elif len(s[x].op.axis) >= 3:
         fused = s[x].fuse(s[x].op.axis[0], s[x].op.axis[1])
         s[x].parallel(fused)
     else:
