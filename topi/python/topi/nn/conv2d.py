@@ -428,7 +428,7 @@ def conv2d_nhwc(Input, Filter, stride, padding, out_dtype='float32'):
 
 
 @tvm.target.generic_func
-def conv2d_nChwc(data, kernel, num_filter, kernel_size, stride, padding, out_dtype='float32'):
+def conv2d_NCHWc(data, kernel, num_filter, kernel_size, stride, padding, out_dtype='float32'):
     """Conv2D operator for nChw[x]c layout.
 
     Parameters
@@ -463,7 +463,7 @@ def conv2d_nChwc(data, kernel, num_filter, kernel_size, stride, padding, out_dty
     """
     # search platform specific declaration first
     # default declaration
-    raise ValueError("missing register for topi.nn.conv2d_nChwc")
+    raise ValueError("missing register for topi.nn.conv2d_NCHWc")
 
 # map from schedule type to declaration function
 _SCH_TO_DECL_FUNC = {
