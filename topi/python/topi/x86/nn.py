@@ -5,27 +5,6 @@ import tvm
 from .. import generic
 from .. import tag
 
-def _default_schedule(outs, auto_inline):
-    """Default schedule for x86."""
-    x = outs[0]
-    s = tvm.create_schedule([x.op for x in outs])
-    if auto_inline:
-        tvm.schedule.AutoInlineInjective(s)
-        s[x].fuse(s[x].op.axis)
-        return s
-    if len(s[x].op.axis) == 4:
-        n, c, _, _ = s[x].op.axis
-        fused = s[x].fuse(n, c) # for nhwc layout, fuse n and h
-        s[x].parallel(fused)
-    elif len(s[x].op.axis) == 5:
-        n, C, h, _, _ = s[x].op.axis
-        fused = s[x].fuse(n, C, h)
-        s[x].parallel(fused)
-    else:
-        s[x].parallel(s[x].op.axis[0])
-    return s
-
-
 @generic.schedule_softmax.register(["cpu"])
 def schedule_softmax(outs):
     """Schedule for softmax
@@ -45,16 +24,11 @@ def schedule_softmax(outs):
     x = outs[0]
     s = tvm.create_schedule([x.op for x in outs])
     tvm.schedule.AutoInlineInjective(s)
-    if len(s[x].op.axis) == 4:
-        n, c, _, _ = s[x].op.axis
-        fused = s[x].fuse(n, c) # for nhwc layout, fuse n and h
-        s[x].parallel(fused)
-    elif len(s[x].op.axis) >= 5:
+    if len(s[x].op.axis) >= 5:
         fused = s[x].fuse(s[x].op.axis[0], s[x].op.axis[1], s[x].op.axis[2])
         s[x].parallel(fused)
-    elif len(s[x].op.axis) == 3:
-        n, c, _ = s[x].op.axis
-        fused = s[x].fuse(n, c)
+    if len(s[x].op.axis) >= 3:
+        fused = s[x].fuse(s[x].op.axis[0], s[x].op.axis[1])
         s[x].parallel(fused)
     else:
         s[x].parallel(s[x].op.axis[0])
