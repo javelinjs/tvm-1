@@ -123,6 +123,13 @@ public class Module extends TVMValue {
   }
 
   /**
+   * @return type key of the module.
+   */
+  public String typeKey() {
+    return getApi("_GetTypeKey").pushArg(this).invoke().asString();
+  }
+
+  /**
    * Load module from file.
    * @param path The path to the module file.
    * @param fmt The format of the file,

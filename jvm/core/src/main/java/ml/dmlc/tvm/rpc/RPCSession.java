@@ -34,7 +34,7 @@ import java.util.Map;
  */
 public class RPCSession {
   private final Module session;
-  private final int tblIndex;
+  public final int tblIndex;
   private final Map<String, Function> remoteFuncs = new HashMap<String, Function>();
 
   RPCSession(Module sess) {

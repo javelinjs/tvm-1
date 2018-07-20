@@ -44,7 +44,12 @@ public class RPC {
           }
         };
 
-  static Function getApi(String name) {
+  /**
+   * Get internal function starts with namespace tvm.rpc.
+   * @param name function name.
+   * @return the function, null if not exists.
+   */
+  public static Function getApi(String name) {
     Function func = apiFuncs.get().get(name);
     if (func == null) {
       func = Function.getFunction("rpc." + name);
