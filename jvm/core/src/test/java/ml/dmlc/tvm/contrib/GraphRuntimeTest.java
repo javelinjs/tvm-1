@@ -49,7 +49,7 @@ public class GraphRuntimeTest {
         .useDelimiter("\\Z").next();
 
     TVMContext ctx = TVMContext.cpu();
-    GraphRuntime.GraphModule graph = GraphRuntime.create(graphJson, libmod, ctx);
+    GraphModule graph = GraphRuntime.create(graphJson, libmod, ctx);
 
     long[] shape = new long[]{4};
     NDArray arr = NDArray.empty(shape, ctx);
@@ -89,7 +89,7 @@ public class GraphRuntimeTest {
       remote.upload(new File(libPath));
       Module mlib = remote.loadModule("graph_addone_lib.so");
 
-      GraphRuntime.GraphModule graph = GraphRuntime.create(graphJson, mlib, ctx, remote);
+      GraphModule graph = GraphRuntime.create(graphJson, mlib, ctx);
 
       long[] shape = new long[]{4};
       NDArray arr = NDArray.empty(shape, ctx);

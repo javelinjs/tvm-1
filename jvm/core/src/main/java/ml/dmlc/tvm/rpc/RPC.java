@@ -49,7 +49,7 @@ public class RPC {
    * @param name function name.
    * @return the function, null if not exists.
    */
-  public static Function getApi(String name) {
+  static Function getApi(String name) {
     Function func = apiFuncs.get().get(name);
     if (func == null) {
       func = Function.getFunction("rpc." + name);
