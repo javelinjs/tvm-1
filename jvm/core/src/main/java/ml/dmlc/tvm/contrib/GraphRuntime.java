@@ -1,3 +1,20 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package ml.dmlc.tvm.contrib;
 
 import ml.dmlc.tvm.Function;
@@ -49,12 +66,14 @@ public class GraphRuntime {
         throw new RuntimeException("Cannot find global function tvm.rpc._ModuleHandle."
             + "Did you compile tvm_runtime with the correct version?");
       }
-      TVMValue hmod = rpcModuleHandle.pushArg(libmod).invoke();
+
       Function fcreate = Function.getFunction("tvm.graph_runtime.remote_create");
       if (fcreate == null) {
         throw new RuntimeException("Cannot find global function tvm.graph_runtime.remote_create."
             + "Did you compile tvm_runtime with correct version?");
       }
+
+      TVMValue hmod = rpcModuleHandle.pushArg(libmod).invoke();
       graphModule = fcreate.call(graphJson, hmod,
           ctx.deviceType % RPC.RPC_SESS_MASK, ctx.deviceId).asModule();
     } else if (rpcSession == null && ctx.deviceType < RPC.RPC_SESS_MASK) {
@@ -103,6 +122,24 @@ public class GraphRuntime {
         // ignore
       }
       floadParams = module.getFunction("load_params");
+    }
+
+    /**
+     * Release the GraphModule.
+     * <p>
+     * We highly recommend you to do this manually since the GC strategy is lazy.
+     * </p>
+     */
+    public void release() {
+      fsetInput.release();
+      frun.release();
+      fgetInput.release();
+      fgetOutput.release();
+      if (fdebugGetOutput != null) {
+        fdebugGetOutput.release();
+      }
+      floadParams.release();
+      module.release();
     }
 
     /**
