@@ -232,3 +232,8 @@ def depthwise_conv2d_backward_weight_nhwc(Input, Out_grad, oshape, fshape, strid
         tag='depthwise_conv2d_backward_weight_nhwc')
 
     return Weight_grad
+
+
+@tvm.target.generic_func
+def depthwise_conv2d_NCHWc(Input, Filter, stride, padding, out_dtype=None):
+    raise ValueError("missing register for topi.nn.depthwise_conv2d_NCHWc")
