@@ -220,7 +220,15 @@ def _alter_conv2d_layout(attrs, inputs, tinfos):
     copy_inputs = [s for s in inputs]
     new_attrs = {k : attrs[k] for k in attrs.keys()}
     # only optimize for NCHW, groups=1 conv
-    if attrs['layout'] != 'NCHW' or attrs.get_int("groups") != 1:
+    if attrs['layout'] != 'NCHW':
+        return None
+
+    if attrs.get_int("groups") == attrs.get_int("channels"):
+        new_attrs['layout'] = 'NCHW%dc' % 16
+        new_attrs['out_layout'] = 'NCHW%dc' % 16
+        new_attrs['kernel_layout'] = 'OIHW%do' % 16
+        return sym.contrib.conv2d_NCHWc(*copy_inputs, **new_attrs)
+    elif attrs.get_int("groups") != 1:
         return None
 
     data = tinfos[0]

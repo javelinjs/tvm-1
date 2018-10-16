@@ -24,7 +24,6 @@ def _get_default_schedule(out_width, out_channel, simd_width=16):
             reg_n = n
             break
 
-    print(AVXDepthwiseConv(oc_bn, reg_n))
     return AVXDepthwiseConv(oc_bn, reg_n)
 
 
@@ -112,3 +111,80 @@ def schedule_depthwise_conv2d(outs):
 
     traverse(outs[0].op)
     return s
+
+def _schedule_depthwise_conv_NCHWc(s, sch, data, kernel, conv_out, output):
+    # schedule data
+    A = data
+    if isinstance(s[A].op, tvm.tensor.ComputeOp):
+        batch, ic_chunk, ih, iw, ic_block = s[A].op.axis
+        p = s[A].fuse(ic_chunk, ih)
+        s[A].parallel(p)
+
+    C, O = conv_out, output
+    CC = s.cache_write(C, 'global')
+
+    _, ic_chunk, oh, ow, ic_block = s[C].op.axis
+    ow_chunk, ow_block = s[C].split(ow, factor=sch.reg_n)
+    s[C].reorder(ic_chunk, oh, ow_chunk, ow_block, ic_block)
+    s[C].vectorize(ic_block)
+    parallel_axis = s[C].fuse(ic_chunk, oh)
+    s[C].parallel(parallel_axis)
+    s[C].unroll(ow_block)
+
+    s[CC].compute_at(s[C], ow_chunk)
+    _, ic_chunk, oh, ow, ic_block = s[CC].op.axis
+    kh, kw = s[CC].op.reduce_axis
+
+    ow_chunk, ow_block = s[CC].split(ow, factor=sch.reg_n)
+
+    s[CC].reorder(ic_chunk, oh, kh, kw, ow_block, ic_block)
+
+    s[CC].vectorize(ic_block)
+    s[CC].unroll(ow_block)
+
+    if C != O:
+        batch, oc_chunk, oh, ow, oc_block = s[O].op.axis
+        ow_chunk, ow_block = s[O].split(ow, factor=sch.reg_n)
+        s[O].reorder(oc_chunk, oh, ow_chunk, ow_block, oc_block)
+        parallel_axis = s[O].fuse(oc_chunk, oh)
+        s[C].compute_at(s[O], parallel_axis)
+        s[O].vectorize(oc_block)
+        s[O].parallel(parallel_axis)
+
+    return s
+
+@generic.schedule_depthwise_conv2d_NCHWc.register(["cpu"])
+def schedule_depthwise_conv2d_NCHWc(outs):
+    s = tvm.create_schedule([x.op for x in outs])
+    scheduled_ops = []
+
+    def traverse(op):
+        """Traverse operators from computation graph"""
+        # inline all one-to-one-mapping operators except the last stage (output)
+        if tag.is_broadcast(op.tag):
+            if op not in s.outputs:
+                s[op].compute_inline()
+            for tensor in op.input_tensors:
+                if tensor.op.input_tensors and tensor.op not in scheduled_ops:
+                    traverse(tensor.op)
+
+        if 'depthwise_conv2d_NCHWc' in op.tag:
+            conv_out = op.output(0)
+            kernel = conv_out.op.input_tensors[1]
+            data_vec = conv_out.op.input_tensors[0]
+            # data = data_vec.op.input_tensors[0]
+            # data_pad = None
+            # if isinstance(data.op, tvm.tensor.ComputeOp) and "pad" in data.op.tag:
+            #     data_pad = data
+            #     data = data_pad.op.input_tensors[0]
+
+            n, out_channel_chunk, out_height, out_width, out_channel_block = [x.value for x in conv_out.shape]
+
+            sch = _get_default_schedule(out_width, out_channel_chunk*out_channel_block, simd_width=16)
+            _schedule_depthwise_conv_NCHWc(s, sch, data_vec, kernel, conv_out, outs[0])
+
+        scheduled_ops.append(op)
+
+    traverse(outs[0].op)
+    return s
+

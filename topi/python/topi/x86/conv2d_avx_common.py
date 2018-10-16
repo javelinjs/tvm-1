@@ -209,7 +209,6 @@ def _declaration_conv_NCHWc(wkl, sch, data, kernel):
 
 
 def _schedule_conv_NCHWc(s, wkl, sch, data, kernel, conv_out, last):
-    print(wkl)
     # schedule data
     A = data
     if isinstance(s[A].op, tvm.tensor.ComputeOp):

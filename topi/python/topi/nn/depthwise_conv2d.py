@@ -50,6 +50,10 @@ def depthwise_conv2d_nchw(Input, Filter, stride, padding, out_dtype=None):
     out_height = simplify((in_height - filter_height + pad_top + pad_down) // stride_h + 1)
     out_width = simplify((in_width - filter_width + pad_left + pad_right) // stride_w + 1)
 
+    print("filter_channel = {}, channel_multiplier = {}".format(filter_channel, channel_multiplier))
+    print("DepthwiseConv(height={}, width={}, in_filter={}, out_filter={}, hkernel={}, wkernel={}, hpad={}, wpad={}, hstride={}, wstride={})".format(
+        in_height, in_width, in_channel, channel_multiplier, filter_height, filter_width, pad_top, pad_left, stride_h, stride_w))
+
     # padding stage
     pad_before = [0, 0, pad_top, pad_left]
     pad_after = [0, 0, pad_down, pad_right]
@@ -64,6 +68,48 @@ def depthwise_conv2d_nchw(Input, Filter, stride, padding, out_dtype=None):
              Filter[c/channel_multiplier, c%channel_multiplier, di, dj].astype(out_dtype)),
             axis=[di, dj]),
         name='DepthwiseConv2d', tag="depthwise_conv2d_nchw")
+    return Output
+
+
+@tvm.target.generic_func
+def depthwise_conv2d_NCHWc(Input, Filter, stride, padding, out_dtype=None):
+    out_dtype = Input.dtype if out_dtype is None else out_dtype
+
+    batch, in_channel_chunk, in_height, in_width, in_channel_block = Input.shape
+    filter_channel_chunk, channel_multiplier, filter_height, filter_width, filter_channel_block = Filter.shape
+
+    from topi.util import get_const_int
+    assert(get_const_int(in_channel_chunk) == get_const_int(filter_channel_chunk))
+    assert(get_const_int(in_channel_block) == get_const_int(filter_channel_block))
+    assert(get_const_int(channel_multiplier) == 1)
+
+    if isinstance(stride, int):
+        stride_h = stride_w = stride
+    else:
+        stride_h, stride_w = stride
+
+    pad_top, pad_left, pad_down, pad_right = get_pad_tuple(
+        padding, (filter_height, filter_width))
+    out_height = simplify((in_height - filter_height + pad_top + pad_down) // stride_h + 1)
+    out_width = simplify((in_width - filter_width + pad_left + pad_right) // stride_w + 1)
+
+    # padding stage
+    if pad_top > 0 or pad_left > 0 or pad_down > 0 or pad_right > 0:
+        pad_before = [0, 0, pad_top, pad_left, 0]
+        pad_after = [0, 0, pad_down, pad_right, 0]
+        PaddedInput = pad(Input, pad_before, pad_after, name="PaddedInput")
+    else:
+        PaddedInput = Input
+    # depthconv stage
+    di = tvm.reduce_axis((0, filter_height), name='di')
+    dj = tvm.reduce_axis((0, filter_width), name='dj')
+    Output = tvm.compute(
+        (batch, in_channel_chunk, out_height, out_width, in_channel_block),
+        lambda b, ic_chunk, i, j, ic_block: tvm.sum(
+            (PaddedInput[b, ic_chunk, i*stride_h+di, j*stride_w+dj, ic_block].astype(out_dtype) *
+             Filter[ic_chunk, 0, di, dj, ic_block].astype(out_dtype)),
+            axis=[di, dj]),
+        name='DepthwiseConv2d', tag="depthwise_conv2d_NCHWc")
     return Output
 
 
@@ -233,7 +279,3 @@ def depthwise_conv2d_backward_weight_nhwc(Input, Out_grad, oshape, fshape, strid
 
     return Weight_grad
 
-
-@tvm.target.generic_func
-def depthwise_conv2d_NCHWc(Input, Filter, stride, padding, out_dtype=None):
-    raise ValueError("missing register for topi.nn.depthwise_conv2d_NCHWc")
