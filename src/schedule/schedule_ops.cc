@@ -25,6 +25,7 @@ Stmt MakePipeline(const Stage& s,
                   Stmt consumer,
                   bool debug_keep_trivial_loop) {
   Stmt producer = s->op->BuildProvide(s, dom_map, debug_keep_trivial_loop);
+  LOG(INFO) << "producer = " << producer;
   if (producer.defined()) {
     producer = ProducerConsumer::make(s->op, true, producer);
   }
@@ -389,6 +390,7 @@ Stmt ScheduleOps(
       // do nothing
     } else if (attach_spec->attach_type == kGroupRoot) {
       CHECK(!s->group.defined());
+      LOG(INFO) << "attach_spec->attach_type == kGroupRoot";
       body = MakePipeline(s, dom_map, body, debug_keep_trivial_loop);
     } else {
       CHECK_EQ(attach_spec->attach_type, kScope);

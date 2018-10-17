@@ -401,6 +401,7 @@ Stmt ComputeOpNode::BuildProvide(
     // specially handle cross thread reduction.
     return MakeCrossThreadReduction(this, stage, dom_map, debug_keep_trivial_loop);
   } else if (ctype == ComputeType::kTensorize) {
+    LOG(INFO) << "MakeTensorize, if make compute directly: " << MakeComputeStmt(this, stage, dom_map, debug_keep_trivial_loop);
     return MakeTensorize(this, stage, dom_map, debug_keep_trivial_loop);
   } else {
     return MakeComputeStmt(this, stage, dom_map, debug_keep_trivial_loop);

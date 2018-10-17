@@ -409,7 +409,12 @@ Stmt MakeTensorize(const ComputeOpNode* self,
     CHECK_EQ(n.init_predicates.size(), 0U);
     CHECK(intrin->body.defined())
         << "Normal store op for intrin " << intrin << " is not defined";
+    LOG(INFO) << "intrin->body = " << intrin->body;
+    for (int i = 0; i < output_bind_nest.size(); ++i) {
+      LOG(INFO) << "output_bind_nest[" << i << "] = " << output_bind_nest[i];
+    }
     Stmt body = MergeNest(output_bind_nest, intrin->body);
+    LOG(INFO) << "After output bind nest, body = " << body;
     body = MergeNest(input_bind_nest, body);
     body = Substitute(body, vmap);
     body = MergeNest(binder.asserts(), body);
