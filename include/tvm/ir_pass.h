@@ -326,6 +326,8 @@ Stmt RewriteUnsafeSelect(Stmt stmt);
  */
 Stmt LowerStorageAccessInfo(Stmt stmt);
 
+Stmt EmitIntrinsic(Stmt stmt);
+
 /*!
  * \brief Make an user callable API LoweredFunc.
  *

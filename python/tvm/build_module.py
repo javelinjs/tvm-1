@@ -339,9 +339,6 @@ def lower(sch,
         sch = sch.normalize()
         bounds = schedule.InferBound(sch)
         stmt = schedule.ScheduleOps(sch, bounds)
-        print('----')
-        print(stmt)
-        print('----')
         stmt = ir_pass.InjectPrefetch(stmt)
     else:
         #So far there is no op for hybrid script, so a plain ir body is given
@@ -359,6 +356,10 @@ def lower(sch,
     # Phase 2
     if not simple_mode:
         stmt = ir_pass.LoopPartition(stmt, cfg.partition_const_loop)
+    print('---')
+    print(stmt)
+    print('---')
+    stmt = ir_pass.EmitIntrinsic(stmt)
     stmt = ir_pass.VectorizeLoop(stmt)
     stmt = ir_pass.InjectVirtualThread(stmt)
     stmt = ir_pass.InjectDoubleBuffer(stmt, cfg.double_buffer_split_loop)
