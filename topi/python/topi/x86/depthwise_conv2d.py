@@ -4,14 +4,22 @@ from collections import namedtuple
 import tvm
 from .. import generic, tag
 from .. import nn
-from ..nn.util import infer_pad, infer_stride
-from ..nn.depthwise_conv2d import depthwise_conv2d_nchw
+from ..nn.util import infer_pad, infer_stride, get_const_int, get_pad_tuple
+from ..util import get_const_tuple
+from ..nn.depthwise_conv2d import depthwise_conv2d_nchw, depthwise_conv2d_NCHWc
+from ..nn.pad import pad
 
 from .check_targets import check_skylake
 
-AVXDepthwiseConv = namedtuple('AVXDepthwiseConv', ['oc_bn', 'reg_n'])
+AVXDepthwiseConv = namedtuple('AVXDepthwiseConv', ['ic_bn', 'oc_bn', 'reg_n'])
 
-def _get_default_schedule(out_width, out_channel, simd_width=16):
+def _get_default_schedule(out_width, in_channel, out_channel, simd_width=16):
+    ic_bn = 1
+    for bn in range(simd_width, 0, -1):
+        if in_channel % bn == 0:
+            ic_bn = bn
+            break
+
     oc_bn = 1
     for bn in range(simd_width, 0, -1):
         if out_channel % bn == 0:
@@ -24,7 +32,7 @@ def _get_default_schedule(out_width, out_channel, simd_width=16):
             reg_n = n
             break
 
-    return AVXDepthwiseConv(oc_bn, reg_n)
+    return AVXDepthwiseConv(ic_bn, oc_bn, reg_n)
 
 
 def _schedule_depthwise_conv(s, sch, data, kernel, conv_out):
@@ -102,9 +110,10 @@ def schedule_depthwise_conv2d(outs):
             #     data_pad = data
             #     data = data_pad.op.input_tensors[0]
 
+            in_channel = kernel.shape[0].value
             n, out_channel, out_height, out_width = [x.value for x in conv_out.shape]
 
-            sch = _get_default_schedule(out_width, out_channel, simd_width=16)
+            sch = _get_default_schedule(out_width, in_channel, out_channel, simd_width=16)
             _schedule_depthwise_conv(s, sch, data_vec, kernel, conv_out)
 
         scheduled_ops.append(op)
@@ -178,13 +187,72 @@ def schedule_depthwise_conv2d_NCHWc(outs):
             #     data_pad = data
             #     data = data_pad.op.input_tensors[0]
 
+            in_channel_chunk, _, _, _, in_channel_block = [x.value for x in kernel.shape]
             n, out_channel_chunk, out_height, out_width, out_channel_block = [x.value for x in conv_out.shape]
 
-            sch = _get_default_schedule(out_width, out_channel_chunk*out_channel_block, simd_width=16)
+            sch = _get_default_schedule(out_width, in_channel_chunk*in_channel_block,
+                                        out_channel_chunk*out_channel_block, simd_width=16)
             _schedule_depthwise_conv_NCHWc(s, sch, data_vec, kernel, conv_out, outs[0])
 
         scheduled_ops.append(op)
 
     traverse(outs[0].op)
     return s
+
+
+@depthwise_conv2d_NCHWc.register("cpu")
+def decl_depthwise_conv2d_NCHWc(Input, Filter, stride, padding, out_dtype=None):
+    out_dtype = Input.dtype if out_dtype is None else out_dtype
+
+    batch, in_channel_chunk, in_height, in_width, in_channel_block = get_const_tuple(Input.shape)
+    filter_channel_chunk, channel_multiplier, filter_height, filter_width, filter_channel_block = get_const_tuple(Filter.shape)
+
+    from topi.util import get_const_int
+    assert(get_const_int(in_channel_chunk) == get_const_int(filter_channel_chunk))
+    assert(get_const_int(in_channel_block) == get_const_int(filter_channel_block))
+    # assert(get_const_int(channel_multiplier) == 1)
+
+    if isinstance(stride, int):
+        stride_h = stride_w = stride
+    else:
+        stride_h, stride_w = stride
+
+    pad_top, pad_left, pad_down, pad_right = get_pad_tuple(
+        padding, (filter_height, filter_width))
+    in_channel = in_channel_chunk * in_channel_block
+    out_channel = in_channel_chunk * in_channel_block * channel_multiplier
+    out_height = (in_height - filter_height + pad_top + pad_down) // stride_h + 1
+    out_width = (in_width - filter_width + pad_left + pad_right) // stride_w + 1
+    sch = _get_default_schedule(get_const_int(out_width),
+                                get_const_int(in_channel),
+                                get_const_int(out_channel),
+                                simd_width=16)
+
+    out_channel_chunk = out_channel // sch.oc_bn
+    out_channel_block = sch.oc_bn
+
+    # padding stage
+    if pad_top > 0 or pad_left > 0 or pad_down > 0 or pad_right > 0:
+        pad_before = [0, 0, pad_top, pad_left, 0]
+        pad_after = [0, 0, pad_down, pad_right, 0]
+        PaddedInput = pad(Input, pad_before, pad_after, name="PaddedInput")
+    else:
+        PaddedInput = Input
+    # depthconv stage
+    di = tvm.reduce_axis((0, filter_height), name='di')
+    dj = tvm.reduce_axis((0, filter_width), name='dj')
+    Output = tvm.compute(
+        (batch, out_channel_chunk, out_height, out_width, out_channel_block),
+        lambda b, oc_chunk, i, j, oc_block: tvm.sum(
+            (PaddedInput[b,
+                         (oc_chunk * sch.oc_bn + oc_block)//channel_multiplier//sch.ic_bn,
+                         i*stride_h+di, j*stride_w+dj,
+                         ((oc_chunk * sch.oc_bn + oc_block)//channel_multiplier) % sch.ic_bn].astype(out_dtype) *
+             Filter[(oc_chunk * sch.oc_bn + oc_block)//channel_multiplier//sch.ic_bn,
+                    (oc_chunk * sch.oc_bn + oc_block)%channel_multiplier,
+                    di, dj,
+                    ((oc_chunk * sch.oc_bn + oc_block)//channel_multiplier) % sch.ic_bn].astype(out_dtype)),
+            axis=[di, dj]),
+        name='DepthwiseConv2d', tag="depthwise_conv2d_NCHWc")
+    return Output
 
