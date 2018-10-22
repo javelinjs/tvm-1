@@ -232,3 +232,32 @@ def depthwise_conv2d_backward_weight_nhwc(Input, Out_grad, oshape, fshape, strid
         tag='depthwise_conv2d_backward_weight_nhwc')
 
     return Weight_grad
+
+@tvm.target.generic_func
+def depthwise_conv2d_NCHWc(Input, Filter, strides, padding, out_dtype=None):
+    """Depthwise convolution NCHW[x]c forward operator.
+
+    Parameters
+    ----------
+    Input : tvm.Tensor
+        5-D with shape [batch, in_channel_chunk, in_height, in_width, in_channel_block]
+
+    Filter : tvm.Tensor
+        4-D with shape [out_channel_chunk, filter_height, filter_width, out_channel_block]
+        where out_channel = in_channel * channel_multiplier
+
+    stride : tuple of two ints
+        The spatial stride along height and width
+
+    padding : int or str
+        Padding size, or ['VALID', 'SAME']
+
+    out_dtype: str, optional
+        Output data type
+
+    Returns
+    -------
+    Output : tvm.Tensor
+        4-D with shape [batch, out_channel, out_height, out_width]
+    """
+    raise ValueError("missing register for topi.nn.depthwise_conv2d_NCHWc")
