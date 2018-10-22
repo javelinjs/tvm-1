@@ -13,7 +13,7 @@ from ..nn.conv2d import conv2d, conv2d_NCHWc, conv2d_alter_layout, \
     _get_schedule_NCHWc_int8, _get_alter_layout_schedule, Workload
 from ..nn.pad import pad
 
-from . import conv2d_avx_1x1, conv2d_avx_common
+from . import conv2d_avx_1x1, conv2d_avx_common, depthwise_conv2d
 from .conv2d_avx_common import AVXConvCommonFwd
 from .conv2d_avx_1x1 import AVXConv1x1Fwd
 from .check_targets import check_skylake
@@ -211,13 +211,20 @@ def _get_fp32_len():
 
 
 def _get_default_sch(workload):
+    op = workload[0]
     fp32_vec_len = _get_fp32_len()
-    _, _, kh, kw, _ = workload[2]
-    is_kernel_1x1 = kh == 1 and kw == 1
-    if is_kernel_1x1:
-        cfg = conv2d_avx_1x1._fallback_schedule(workload, fp32_vec_len)
+    if op == 'conv2d_NCHWc':
+        # oc, ic, kh, kw, dtype
+        _, _, kh, kw, _ = workload[2]
+        is_kernel_1x1 = kh == 1 and kw == 1
+        if is_kernel_1x1:
+            cfg = conv2d_avx_1x1._fallback_schedule(workload, fp32_vec_len)
+        else:
+            cfg = conv2d_avx_common._fallback_schedule(workload, fp32_vec_len)
+    elif op == 'depthwise_conv2d_NCHWc':
+        cfg = depthwise_conv2d._fallback_schedule(workload, fp32_vec_len)
     else:
-        cfg = conv2d_avx_common._fallback_schedule(workload, fp32_vec_len)
+        raise ValueError("No default schedule for {}".format(op))
     return cfg
 
 
@@ -502,8 +509,7 @@ def _topi_nn_conv2d_NCHWc(*args, **kwargs):
     return s, [args[0], args[1], C]
 
 
-def conv_NCHWc_arg_to_workload(data, kernel, kernel_size, strides,
-                               padding, layout, out_layout, out_dtype):
+def conv_NCHWc_arg_to_workload(data, kernel, strides, padding, layout, out_layout, out_dtype, is_depthwise=False):
     """convert argument to workload"""
     dshape = get_const_tuple(data.shape)
     kshape = get_const_tuple(kernel.shape)
@@ -517,16 +523,18 @@ def conv_NCHWc_arg_to_workload(data, kernel, kernel_size, strides,
                                       kshape[2], kshape[3]), dtype=kernel.dtype)
     else:
         raw_kernel = kernel
-    return ('conv2d_NCHWc', ) + autotvm.task.args_to_workload(
+    name = 'depthwise_conv2d_NCHWc' if is_depthwise else 'conv2d_NCHWc'
+    return (name, ) + autotvm.task.args_to_workload(
         [raw_data, raw_kernel, strides, padding, layout, out_layout,
          out_dtype])
 
 
-def _query_dispatcher(workload, in_alter_op=False):
+def _query_dispatcher(workload, update_workload=None):
     dispatch_ctx = autotvm.task.DispatchContext.current
     if isinstance(dispatch_ctx, ApplyGraphBest):
-        if in_alter_op:
+        if update_workload:
             cfg = dispatch_ctx.query(None, None)
+            dispatch_ctx.update_global_dict(update_workload(cfg), cfg)
         else:
             cfg = dispatch_ctx.query_global_dict(workload)
     else:
@@ -543,11 +551,7 @@ def _alter_conv2d_layout(attrs, inputs, tinfo):
     copy_inputs = [s for s in inputs]
     new_attrs = {k : attrs[k] for k in attrs.keys()}
     data, kernel = tinfo[0], tinfo[1]
-    # only optimize for NCHW, groups=1 conv
-    if attrs['layout'] != 'NCHW' or attrs.get_int("groups") != 1:
-        return None
 
-    kernel_size = attrs.get_int_tuple("kernel_size")
     padding = attrs.get_int_tuple("padding")
     strides = attrs.get_int_tuple("strides")
     layout = attrs['layout']
@@ -555,26 +559,41 @@ def _alter_conv2d_layout(attrs, inputs, tinfo):
 
     dtype = data.dtype
     out_dtype = dtype if attrs["out_dtype"] == "same" else attrs["out_dtype"]
-    workload = conv_NCHWc_arg_to_workload(data, kernel, kernel_size, strides,
-                                          padding, layout, out_layout, out_dtype)
-    cfg = _query_dispatcher(workload, True)
+    is_depthwise = (attrs.get_int("groups") == attrs.get_int("channels"))
+
+    workload = conv_NCHWc_arg_to_workload(data, kernel, strides,
+                                          padding, layout, out_layout, out_dtype, is_depthwise)
+    cfg = _query_dispatcher(workload, lambda c:
+        conv_NCHWc_arg_to_workload(data, kernel, strides, padding,
+                                   'NCHW%dc' % c["tile_ic"].size[-1],
+                                   'NCHW%dc' % c["tile_oc"].size[-1],
+                                   out_dtype, is_depthwise))
     ic_bn, oc_bn = cfg["tile_ic"].size[-1], cfg["tile_oc"].size[-1]
     new_attrs['layout'] = 'NCHW%dc' % ic_bn
     new_attrs['out_layout'] = 'NCHW%dc' % oc_bn
 
-    # Store global schedule dictionary for ApplyGraphBest dispatcher
-    dispatch_ctx = autotvm.task.DispatchContext.current
-    if isinstance(dispatch_ctx, ApplyGraphBest):
-        workload = conv_NCHWc_arg_to_workload(data, kernel, kernel_size, strides,
-                                              padding, new_attrs['layout'],
-                                              new_attrs['out_layout'], out_dtype)
-        global_dict_key = workload
-        dispatch_ctx.update_global_dict(global_dict_key, cfg)
-
-    # (oc, ic, h, w) -> (OC, IC, h, w, ic, oc)
-    new_attrs['kernel_layout'] = 'OIHW%di%do' % (ic_bn, oc_bn)
-
-    return sym.contrib.conv2d_NCHWc(*copy_inputs, **new_attrs)
+    # only optimize for NCHW, groups=1 or depthwise conv
+    if attrs['layout'] != 'NCHW':
+        return None
+    elif attrs.get_int("groups") == attrs.get_int("channels"):
+        # depthwise conv
+        new_attrs['layout'] = 'NCHW%dc' % 16
+        new_attrs['out_layout'] = 'NCHW%dc' % 16
+        # in_channel, channel_multiplier, kh, kw -> out_channel_chunk, kh, kw, out_channel_block
+        IC, CM, KH, KW = [x.value for x in kernel.shape]
+        kernel_sym = copy_inputs[1]
+        kernel_sym = sym.transpose(kernel_sym, axes=(2, 3, 0, 1))
+        kernel_sym = sym.reshape(kernel_sym, shape=(KH, KW, IC*CM))
+        kernel_sym = sym.reshape(kernel_sym, shape=(KH, KW, IC*CM//16, 16))
+        kernel_sym = sym.transpose(kernel_sym, axes=(2, 0, 1, 3))
+        copy_inputs[1] = kernel_sym
+        return sym.contrib.conv2d_NCHWc(*copy_inputs, **new_attrs)
+    elif attrs.get_int("groups") != 1:
+        return None
+    else:
+        # (oc, ic, h, w) -> (OC, IC, h, w, ic, oc)
+        new_attrs['kernel_layout'] = 'OIHW%di%do' % (ic_bn, oc_bn)
+        return sym.contrib.conv2d_NCHWc(*copy_inputs, **new_attrs)
 
 
 @conv2d_NCHWc.register("cpu")
@@ -584,7 +603,7 @@ def conv2d_NCHWc_cpu(data, kernel, num_filter, kernel_size, strides,
     dispatch_ctx = autotvm.task.DispatchContext.current
     if not isinstance(dispatch_ctx, ApplyGraphBest):
         layout = out_layout = "NCHW"
-    workload = conv_NCHWc_arg_to_workload(data, kernel, kernel_size, strides,
+    workload = conv_NCHWc_arg_to_workload(data, kernel, strides,
                                           padding, layout, out_layout, out_dtype)
     cfg = _query_dispatcher(workload)
     return _declaration_conv_NCHWc(cfg, data, kernel, num_filter, kernel_size, strides,
@@ -651,7 +670,7 @@ def _declaration_conv_NCHWc_impl(cfg, data, kernel, kernel_size, strides, paddin
     kh = tvm.reduce_axis((0, kernel_size[0]), name='kh')
     kw = tvm.reduce_axis((0, kernel_size[1]), name='kw')
 
-    workload = conv_NCHWc_arg_to_workload(data, kernel, kernel_size,
+    workload = conv_NCHWc_arg_to_workload(data, kernel,
                                           strides, padding, layout,
                                           out_layout, out_dtype),
     attrs = {'workload': workload}
@@ -724,7 +743,7 @@ def _schedule_conv2d_NCHWc(cfg, num_filter, kernel_size, strides, padding,
             else:
                 current_cfg = cfg
                 if current_cfg is None:
-                    workload = conv_NCHWc_arg_to_workload(data, kernel, kernel_size, strides,
+                    workload = conv_NCHWc_arg_to_workload(data, kernel, strides,
                                                           padding, layout, out_layout,
                                                           conv_out.dtype)
                     current_cfg = _query_dispatcher(workload)

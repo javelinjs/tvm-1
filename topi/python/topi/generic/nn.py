@@ -245,6 +245,24 @@ def schedule_bitserial_conv2d_nhwc(outs):
     return _default_schedule(outs, False)
 
 
+@tvm.target.generic_func
+def schedule_depthwise_conv2d_NCHWc(strides, padding, layout, out_layout, outs):
+    """Schedule for depthwise_conv_NCHW[x]c
+
+    Parameters
+    ----------
+    outs: Array of Tensor
+          The computation graph description of depthwise_conv_NCHW[x]c
+          in the format of an array of tensors.
+
+    Returns
+    -------
+    sch: Schedule
+        The computation schedule for the op.
+    """
+    return _default_schedule(outs, False)
+
+
 @tvm.target.override_native_generic_func("schedule_reduce")
 def schedule_reduce(outs):
     """Schedule for reduction

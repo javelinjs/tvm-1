@@ -234,7 +234,7 @@ def depthwise_conv2d_backward_weight_nhwc(Input, Out_grad, oshape, fshape, strid
     return Weight_grad
 
 @tvm.target.generic_func
-def depthwise_conv2d_NCHWc(Input, Filter, strides, padding, out_dtype=None):
+def depthwise_conv2d_NCHWc(Input, Filter, strides, padding, in_layout, out_layout, out_dtype=None):
     """Depthwise convolution NCHW[x]c forward operator.
 
     Parameters

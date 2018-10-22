@@ -179,7 +179,7 @@ def compute_contrib_conv2d_NCHWc(attrs, inputs, _):
                                    strides, padding, layout, out_layout)
         # pylint: enable=assignment-from-no-return
     elif groups == channels:
-        out = topi.nn.depthwise_conv2d_NCHWc(inputs[0], inputs[1], strides, padding)
+        out = topi.nn.depthwise_conv2d_NCHWc(inputs[0], inputs[1], strides, padding, layout, out_layout)
     else:
         raise ValueError("not support arbitrary group number > 1 for now")
     if attrs.get_bool("use_bias"):
@@ -203,7 +203,7 @@ def schedule_contrib_conv2d_NCHWc(attrs, outs, target):
             return topi.generic.schedule_conv2d_NCHWc(oc, (kh, kw), strides, padding,
                                                       layout, out_layout, outs)
         elif groups == oc:
-            return topi.generic.schedule_depthwise_conv2d_NCHWc(outs)
+            return topi.generic.schedule_depthwise_conv2d_NCHWc(strides, padding, layout, out_layout, outs)
         else:
             raise ValueError("not support group number > 1 for now")
 

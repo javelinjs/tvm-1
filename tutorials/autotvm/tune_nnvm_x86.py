@@ -126,7 +126,7 @@ def tune_kernels(tasks,
                 padding, layout, layout, dtype]
         args = autotvm.task.nnvm_integration.serialize_args(args)
         task = autotvm.task.create("topi_x86_conv2d_NCHWc", args=args, target=target)
-        task.workload = conv_NCHWc_arg_to_workload(data_plc, kernel_plc, kernel_size,
+        task.workload = conv_NCHWc_arg_to_workload(data_plc, kernel_plc,
                                                    strides, padding, layout, layout, dtype)
 
         # create tuner
