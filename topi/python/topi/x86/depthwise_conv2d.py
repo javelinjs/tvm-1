@@ -180,19 +180,18 @@ def schedule_depthwise_conv2d_NCHWc(outs):
         if 'depthwise_conv2d_NCHWc' in op.tag:
             conv_out = op.output(0)
             kernel = conv_out.op.input_tensors[1]
-            data_vec = conv_out.op.input_tensors[0]
-            # data = data_vec.op.input_tensors[0]
-            # data_pad = None
-            # if isinstance(data.op, tvm.tensor.ComputeOp) and "pad" in data.op.tag:
-            #     data_pad = data
-            #     data = data_pad.op.input_tensors[0]
+            data = conv_out.op.input_tensors[0]
+            if isinstance(data.op, tvm.tensor.ComputeOp) and "pad" in data.op.tag:
+                data_raw = data.op.input_tensors[0]
+                _, in_channel_chunk, _, _, in_channel_block = [x.value for x in data_raw.shape]
+            else:
+                _, in_channel_chunk, _, _, in_channel_block = [x.value for x in data.shape]
 
-            in_channel_chunk, _, _, _, in_channel_block = [x.value for x in kernel.shape]
             n, out_channel_chunk, out_height, out_width, out_channel_block = [x.value for x in conv_out.shape]
 
             sch = _get_default_schedule(out_width, in_channel_chunk*in_channel_block,
                                         out_channel_chunk*out_channel_block, simd_width=16)
-            _schedule_depthwise_conv_NCHWc(s, sch, data_vec, kernel, conv_out, outs[0])
+            _schedule_depthwise_conv_NCHWc(s, sch, data, kernel, conv_out, outs[0])
 
         scheduled_ops.append(op)
 
@@ -205,11 +204,11 @@ def decl_depthwise_conv2d_NCHWc(Input, Filter, stride, padding, out_dtype=None):
     out_dtype = Input.dtype if out_dtype is None else out_dtype
 
     batch, in_channel_chunk, in_height, in_width, in_channel_block = get_const_tuple(Input.shape)
-    filter_channel_chunk, channel_multiplier, filter_height, filter_width, filter_channel_block = get_const_tuple(Filter.shape)
+    out_channel_chunk, filter_height, filter_width, out_channel_block = get_const_tuple(Filter.shape)
 
     from topi.util import get_const_int
-    assert(get_const_int(in_channel_chunk) == get_const_int(filter_channel_chunk))
-    assert(get_const_int(in_channel_block) == get_const_int(filter_channel_block))
+    # assert(get_const_int(in_channel_chunk) == get_const_int(filter_channel_chunk))
+    # assert(get_const_int(in_channel_block) == get_const_int(filter_channel_block))
     # assert(get_const_int(channel_multiplier) == 1)
 
     if isinstance(stride, int):
@@ -219,17 +218,17 @@ def decl_depthwise_conv2d_NCHWc(Input, Filter, stride, padding, out_dtype=None):
 
     pad_top, pad_left, pad_down, pad_right = get_pad_tuple(
         padding, (filter_height, filter_width))
-    in_channel = in_channel_chunk * in_channel_block
-    out_channel = in_channel_chunk * in_channel_block * channel_multiplier
+    # in_channel = in_channel_chunk * in_channel_block
+    # out_channel = out_channel_chunk * out_channel_block
     out_height = (in_height - filter_height + pad_top + pad_down) // stride_h + 1
     out_width = (in_width - filter_width + pad_left + pad_right) // stride_w + 1
-    sch = _get_default_schedule(get_const_int(out_width),
-                                get_const_int(in_channel),
-                                get_const_int(out_channel),
-                                simd_width=16)
-
-    out_channel_chunk = out_channel // sch.oc_bn
-    out_channel_block = sch.oc_bn
+    # sch = _get_default_schedule(get_const_int(out_width),
+    #                             get_const_int(in_channel),
+    #                             get_const_int(out_channel),
+    #                             simd_width=16)
+    #
+    # out_channel_chunk = out_channel // sch.oc_bn
+    # out_channel_block = sch.oc_bn
 
     # padding stage
     if pad_top > 0 or pad_left > 0 or pad_down > 0 or pad_right > 0:
@@ -245,14 +244,10 @@ def decl_depthwise_conv2d_NCHWc(Input, Filter, stride, padding, out_dtype=None):
         (batch, out_channel_chunk, out_height, out_width, out_channel_block),
         lambda b, oc_chunk, i, j, oc_block: tvm.sum(
             (PaddedInput[b,
-                         (oc_chunk * sch.oc_bn + oc_block)//channel_multiplier//sch.ic_bn,
+                         (oc_chunk * out_channel_block + oc_block)//1//in_channel_block,
                          i*stride_h+di, j*stride_w+dj,
-                         ((oc_chunk * sch.oc_bn + oc_block)//channel_multiplier) % sch.ic_bn].astype(out_dtype) *
-             Filter[(oc_chunk * sch.oc_bn + oc_block)//channel_multiplier//sch.ic_bn,
-                    (oc_chunk * sch.oc_bn + oc_block)%channel_multiplier,
-                    di, dj,
-                    ((oc_chunk * sch.oc_bn + oc_block)//channel_multiplier) % sch.ic_bn].astype(out_dtype)),
-            axis=[di, dj]),
+                         ((oc_chunk * out_channel_block + oc_block)//1) % in_channel_block].astype(out_dtype) *
+             Filter[oc_chunk, di, dj, oc_block].astype(out_dtype)), axis=[di, dj]),
         name='DepthwiseConv2d', tag="depthwise_conv2d_NCHWc")
     return Output
 

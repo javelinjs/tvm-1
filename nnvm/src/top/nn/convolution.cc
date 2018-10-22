@@ -82,13 +82,14 @@ inline bool Conv2DInferShape(const nnvm::NodeAttrs& attrs,
 //
 //  wshape[kernel_layout.indexof('O')] *= param.groups;
 
-  TShape wshape({param.channels,
-                 dshape[1] / param.groups,
-                 param.kernel_size[0],
-                 param.kernel_size[1]});
-  wshape = ConvertLayout(wshape, kOIHW, kernel_layout);
-
-  NNVM_ASSIGN_INPUT_SHAPE(attrs, *in_shape, Conv2DParam::kWeight, wshape);
+  // TODO: we do not check weight shape
+//  TShape wshape({param.channels,
+//                 dshape[1] / param.groups,
+//                 param.kernel_size[0],
+//                 param.kernel_size[1]});
+//  wshape = ConvertLayout(wshape, kOIHW, kernel_layout);
+//
+//  NNVM_ASSIGN_INPUT_SHAPE(attrs, *in_shape, Conv2DParam::kWeight, wshape);
   if (param.use_bias) {
     static const Layout default_bias_layout("C");
     TShape bias_shape({param.channels});

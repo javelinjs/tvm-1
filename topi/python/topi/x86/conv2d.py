@@ -223,16 +223,25 @@ def _alter_conv2d_layout(attrs, inputs, tinfos):
     if attrs['layout'] != 'NCHW':
         return None
 
+    data = tinfos[0]
+    kernel = tinfos[1]
+
     if attrs.get_int("groups") == attrs.get_int("channels"):
         new_attrs['layout'] = 'NCHW%dc' % 16
         new_attrs['out_layout'] = 'NCHW%dc' % 16
-        new_attrs['kernel_layout'] = 'OIHW%do' % 16
+        # new_attrs['kernel_layout'] = 'OIHW%do' % 16
+        # in_channel, channel_multiplier, kh, kw
+        IC, CM, KH, KW = [x.value for x in kernel.shape]
+        kernel_sym = copy_inputs[1]
+        kernel_sym = sym.transpose(kernel_sym, axes=(2, 3, 0, 1))
+        kernel_sym = sym.reshape(kernel_sym, shape=(KH, KW, IC*CM))
+        kernel_sym = sym.reshape(kernel_sym, shape=(KH, KW, IC*CM//16, 16))
+        kernel_sym = sym.transpose(kernel_sym, axes=(2, 0, 1, 3))
+        copy_inputs[1] = kernel_sym
         return sym.contrib.conv2d_NCHWc(*copy_inputs, **new_attrs)
     elif attrs.get_int("groups") != 1:
         return None
 
-    data = tinfos[0]
-    kernel = tinfos[1]
 
     import ast
     padding = ast.literal_eval(attrs['padding'])
