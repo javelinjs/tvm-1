@@ -24,7 +24,18 @@ class IntrinsicEmitter : public IRMutator {
   explicit IntrinsicEmitter() {}
 
   Stmt Mutate_(const AttrStmt* op, const Stmt& stmt) {
-    LOG(INFO) << "IntrinsicEmitter";
+    if (attr::IsPragmaKey(op->attr_key) && op->attr_key == "pragma_emit_intrin") {
+      LOG(INFO) << "IntrinsicEmitter";
+      std::string op_str = op->value.as<StringImm>()->value;
+      const runtime::PackedFunc* f = runtime::Registry::Get("tvm.intrin.cce." + op_str);
+      LOG(INFO) << "f == null: " << (f == nullptr);
+      if (f != nullptr) {
+        Stmt r = (*f)(op->body);
+        CHECK(r.defined()) << "intrinsic rule must always return valid Expr";
+      } else {
+        LOG(FATAL) << "No such intrinsic rule: tvm.intrin.cce." << op_str;
+      }
+    }
     return stmt;
   }
 
