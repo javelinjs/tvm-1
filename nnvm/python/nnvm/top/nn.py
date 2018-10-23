@@ -86,8 +86,10 @@ def compute_conv2d(attrs, inputs, _):
     dilation = attrs.get_int_tuple("dilation")
     groups = attrs.get_int("groups")
     channels = attrs.get_int("channels")
-    layout = attrs["layout"]
-    kernel_layout = attrs["kernel_layout"]
+    kernel_size = attrs.get_int_tuple("kernel_size")
+    layout = attrs.get_string("layout")
+    out_layout = attrs.get_string("out_layout")
+    kernel_layout = attrs.get_string("kernel_layout")
     out_dtype = attrs["out_dtype"]
     out_dtype = inputs[0].dtype if out_dtype == "same" else out_dtype
     assert layout in ["NCHW", "NHWC", "NCHW4c"]
@@ -115,7 +117,8 @@ def compute_conv2d(attrs, inputs, _):
          groups == get_const_int(inputs[0].shape[1]) and \
          groups == channels:
         out = topi.nn.depthwise_conv2d_nchw(
-            inputs[0], kernel, strides, padding, out_dtype=out_dtype)
+            inputs[0], kernel, channels, kernel_size, strides, padding, dilation,
+            groups, layout, out_layout, kernel_layout, out_dtype=out_dtype)
     elif layout == "NHWC" and \
          kernel_layout == "HWOI" and \
          groups == get_const_int(inputs[0].shape[3]) and \
@@ -167,19 +170,26 @@ def compute_contrib_conv2d_NCHWc(attrs, inputs, _):
     padding = attrs.get_int_tuple("padding")
     strides = attrs.get_int_tuple("strides")
     dilation = attrs.get_int_tuple("dilation")
-    kh, kw = attrs.get_int_tuple('kernel_size')
     groups = attrs.get_int("groups")
     channels = attrs.get_int("channels")
+    kernel_size = attrs.get_int_tuple("kernel_size")
     layout = attrs.get_string("layout")
     out_layout = attrs.get_string("out_layout")
+    kernel_layout = attrs.get_string("kernel_layout")
+    out_dtype = attrs["out_dtype"]
+    out_dtype = inputs[0].dtype if out_dtype == "same" else out_dtype
     assert dilation == (1, 1), "not support dilate now"
     if groups == 1:
         # pylint: disable=assignment-from-no-return
-        out = topi.nn.conv2d_NCHWc(inputs[0], inputs[1], channels, (kh, kw),
+        out = topi.nn.conv2d_NCHWc(inputs[0], inputs[1], channels, kernel_size,
                                    strides, padding, layout, out_layout)
         # pylint: enable=assignment-from-no-return
     elif groups == channels:
-        out = topi.nn.depthwise_conv2d_NCHWc(inputs[0], inputs[1], strides, padding, layout, out_layout)
+        out = topi.nn.depthwise_conv2d_NCHWc(inputs[0], inputs[1],
+                                             channels, kernel_size,
+                                             strides, padding, dilation,
+                                             groups, layout, out_layout,
+                                             kernel_layout, out_dtype=out_dtype)
     else:
         raise ValueError("not support arbitrary group number > 1 for now")
     if attrs.get_bool("use_bias"):

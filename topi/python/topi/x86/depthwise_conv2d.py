@@ -44,7 +44,10 @@ def _fallback_schedule(wkl, simd_width):
 
 
 @depthwise_conv2d_NCHWc.register("cpu")
-def depthwise_conv2d_NCHWc_cpu(data, kernel, strides, padding, layout, out_layout, out_dtype):
+def depthwise_conv2d_NCHWc_cpu(data, kernel, channels, kernel_size,
+                               strides, padding, dilation,
+                               groups, layout, out_layout,
+                               kernel_layout, out_dtype=None):
     """x86 conv2d_NCHWc declaration."""
     dispatch_ctx = autotvm.task.DispatchContext.current
     if not isinstance(dispatch_ctx, ApplyGraphBest):
@@ -53,7 +56,10 @@ def depthwise_conv2d_NCHWc_cpu(data, kernel, strides, padding, layout, out_layou
     workload = conv_NCHWc_arg_to_workload(data, kernel, strides,
                                           padding, layout, out_layout, out_dtype, is_depthwise=True)
     cfg = _query_dispatcher(workload)
-    return _declaration_depthwise_conv_NCHWc(cfg, data, kernel, strides, padding, out_dtype)
+    return _declaration_depthwise_conv_NCHWc(cfg, data, kernel, channels, kernel_size,
+                                             strides, padding, dilation,
+                                             groups, layout, out_layout,
+                                             kernel_layout, out_dtype)
 
 
 @generic.schedule_depthwise_conv2d_NCHWc.register("cpu")
@@ -61,15 +67,17 @@ def schedule_depthwise_conv2d_NCHWc(strides, padding, layout, out_layout, outs):
     return _schedule_depthwise_conv2d_NCHWc(None, strides, padding, layout, out_layout, outs)
 
 
-def _declaration_depthwise_conv_NCHWc(cfg, Input, Filter, strides, padding, out_dtype):
-    # TODO: pass channel_multiplier
-    channel_multiplier = 1
+def _declaration_depthwise_conv_NCHWc(cfg, Input, Filter, channels, kernel_size,
+                                      strides, padding, dilation,
+                                      groups, layout, out_layout,
+                                      kernel_layout, out_dtype):
     ic_bn, oc_bn = cfg["tile_ic"].size[-1], cfg["tile_oc"].size[-1]
     out_dtype = Input.dtype if out_dtype is None else out_dtype
     batch, in_channel_chunk, in_height, in_width, in_channel_block = get_const_tuple(Input.shape)
     out_channel_chunk, filter_height, filter_width, out_channel_block = get_const_tuple(Filter.shape)
     assert(ic_bn == in_channel_block)
     assert(oc_bn == out_channel_block)
+    assert(channels == out_channel_chunk * out_channel_block)
 
     if isinstance(strides, int):
         stride_h = stride_w = strides
@@ -78,7 +86,8 @@ def _declaration_depthwise_conv_NCHWc(cfg, Input, Filter, strides, padding, out_
     pad_top, pad_left, pad_down, pad_right = get_pad_tuple(
         padding, (filter_height, filter_width))
     in_channel = in_channel_chunk * in_channel_block
-    out_channel = out_channel_chunk * out_channel_block
+    assert(channels % in_channel == 0)
+    channel_multiplier = channels // in_channel
     out_height = (in_height - filter_height + pad_top + pad_down) // stride_h + 1
     out_width = (in_width - filter_width + pad_left + pad_right) // stride_w + 1
     # padding stage
@@ -194,12 +203,8 @@ def _create_schedule_template(cfg, data, kernel, strides, padding):
 def _topi_nn_depthwise_conv2d_NCHWc(*args, **kwargs):
     assert not kwargs, "Do not support kwargs in template function call"
     args = deserialize_args(args)
-    data, kernel = args[:2]
-    strides = args[2]
-    padding = args[3]
-    layout = args[4]
-    out_layout = args[5]
-    dtype = args[6]
+    data, kernel, channels, kernel_size, strides, \
+        padding, dilation, groups, layout, out_layout, kernel_layout, dtype = args
     raw_data_shape = get_const_tuple(data.shape)
     raw_kernel_shape = get_const_tuple(kernel.shape)
 
@@ -212,11 +217,13 @@ def _topi_nn_depthwise_conv2d_NCHWc(*args, **kwargs):
                            cfg["tile_ow"].size[-1])
     new_data_shape = (raw_data_shape[0], raw_data_shape[1] // ic_bn,
                       raw_data_shape[2], raw_data_shape[3], ic_bn)
-    new_kernel_shape = (raw_kernel_shape[0] // ic_bn, raw_kernel_shape[1],
-                        raw_kernel_shape[2], raw_kernel_shape[3], ic_bn)
+    new_kernel_shape = (raw_kernel_shape[0] * raw_kernel_shape[1] // oc_bn,
+                        raw_kernel_shape[2], raw_kernel_shape[3], oc_bn)
     new_data = tvm.placeholder(new_data_shape, data.dtype)
     new_kernel = tvm.placeholder(new_kernel_shape, kernel.dtype)
-    C = _declaration_depthwise_conv_NCHWc(cfg, new_data, new_kernel, strides, padding, dtype)
+    C = _declaration_depthwise_conv_NCHWc(cfg, new_data, new_kernel, channels, kernel_size, strides,
+                                          padding, dilation, groups, layout, out_layout,
+                                          kernel_layout, dtype)
     s = _schedule_depthwise_conv2d_NCHWc(cfg, strides, padding, layout, out_layout, [C])
     return s, [new_data, new_kernel, C]
 

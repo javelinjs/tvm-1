@@ -10,7 +10,10 @@ from ..util import simplify
 
 
 @tvm.target.generic_func
-def depthwise_conv2d_nchw(Input, Filter, stride, padding, out_dtype=None):
+def depthwise_conv2d_nchw(Input, Filter, channels, kernel_size,
+                          strides, padding, dilation,
+                          groups, layout, out_layout,
+                          kernel_layout, out_dtype=None):
     """Depthwise convolution nchw forward operator.
 
     Parameters
@@ -39,10 +42,10 @@ def depthwise_conv2d_nchw(Input, Filter, stride, padding, out_dtype=None):
 
     batch, in_channel, in_height, in_width = Input.shape
     filter_channel, channel_multiplier, filter_height, filter_width = Filter.shape
-    if isinstance(stride, int):
-        stride_h = stride_w = stride
+    if isinstance(strides, int):
+        stride_h = stride_w = strides
     else:
-        stride_h, stride_w = stride
+        stride_h, stride_w = strides
 
     pad_top, pad_left, pad_down, pad_right = get_pad_tuple(
         padding, (filter_height, filter_width))
@@ -234,7 +237,10 @@ def depthwise_conv2d_backward_weight_nhwc(Input, Out_grad, oshape, fshape, strid
     return Weight_grad
 
 @tvm.target.generic_func
-def depthwise_conv2d_NCHWc(Input, Filter, strides, padding, in_layout, out_layout, out_dtype=None):
+def depthwise_conv2d_NCHWc(Input, Filter, channels, kernel_size,
+                           strides, padding, dilation,
+                           groups, layout, out_layout,
+                           kernel_layout, out_dtype=None):
     """Depthwise convolution NCHW[x]c forward operator.
 
     Parameters
