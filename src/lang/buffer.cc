@@ -411,11 +411,61 @@ Buffer BufferNode::make(Var data,
   return Buffer(n);
 }
 
+DataLayout DataLayoutNode::make(const std::string& layout,
+                                const std::string& store_layout) {
+  auto n = make_node<DataLayoutNode>();
+
+  static const uint32_t kUniqueDim = 26;
+  std::vector<int32_t> superdim_pos(kUniqueDim, -1);
+  std::vector<int32_t> subdim_pos(kUniqueDim, -1);
+  std::vector<int64_t> subdim_size(kUniqueDim, -1);
+  std::vector<char> layout_simplified;
+
+  int32_t factor = 0;
+  uint32_t curr = 0;
+  for (size_t i = 0; i < layout.size(); ++i) {
+    const char axis = layout.at(i);
+    if (axis >= 'A' && axis <= 'Z') {
+      int pos = axis - 'A';
+      CHECK_EQ(factor, 0) << "Invalid layout " << layout
+                          << ": invalid factor size " << factor
+                          << " before dimension " << axis;
+      CHECK_EQ(superdim_pos[pos], -1) << "Invalid layout " << layout
+                                      << ": duplicate dimension " << axis;
+      superdim_pos[pos] = curr++;
+      layout_simplified.push_back(axis);
+    } else if (axis >= 'a' && axis <= 'z') {
+      int pos = axis - 'a';
+      CHECK_GT(factor, 0) << "Invalid layout " << layout << ": invalid factor size "
+                          << factor << " for dimension " << axis;
+      CHECK_EQ(subdim_pos[pos], -1) << "Invalid layout " << layout
+                                    << ": duplicate dimension " << axis;
+      CHECK_EQ(subdim_size[pos], -1) << "Invalid layout " << layout
+                                     << ": duplicate dimension " << axis;
+      subdim_pos[pos] = curr++;
+      subdim_size[pos] = factor;
+      layout_simplified.push_back(axis);
+      factor = 0;
+    } else if (axis >= '0' && axis <= '9') {
+      CHECK(factor >= 0) << "Invalid layout " << layout << ": _ is adjacent to a number.";
+      factor = factor * 10 + axis - '0';
+    } else {
+      LOG(FATAL) << "Invalid layout " << layout;
+    }
+  }
+
+  return DataLayout(n);
+}
+
 TVM_STATIC_IR_FUNCTOR(IRPrinter, vtable)
 .set_dispatch<BufferNode>([](const BufferNode *op, IRPrinter *p) {
     p->stream << "buffer(" << op->name << ", " << op << ")";
+})
+.set_dispatch<DataLayoutNode>([](const DataLayoutNode *op, IRPrinter *p) {
+  p->stream << "DataLayout(" << op->orig_layout << " -> " << op->store_layout << ")";
 });
 
 TVM_REGISTER_NODE_TYPE(BufferNode);
+TVM_REGISTER_NODE_TYPE(DataLayoutNode);
 
 }  // namespace tvm

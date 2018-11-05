@@ -17,6 +17,8 @@ namespace tvm {
 
 // Internal node container Buffer
 class BufferNode;
+// Internal node container DataLayout
+class DataLayoutNode;
 
 /*! \brief memory access kind */
 enum class AccessMask : int {
@@ -162,5 +164,57 @@ inline const BufferNode* Buffer::operator->() const {
 TVM_DLL Buffer decl_buffer(Array<Expr> shape,
                            Type dtype = Float(32),
                            std::string name = "buffer");
+
+
+class DataLayout : public NodeRef {
+public:
+  DataLayout() {}
+  explicit DataLayout(NodePtr<Node> n) : NodeRef(n) {}
+
+  // Final shape of the underlying array, given the shape of the normal layout
+  TVM_DLL Array<Expr> ForwardShape(Array<Expr> shape);
+  // Final index of the underlying array, given the normal layout.
+  TVM_DLL Array<Expr> ForwardIndex(Array<Expr> index);
+  // Given store index, recover the original representation space index.
+  TVM_DLL Array<Expr> BackwardIndex(Array<Expr> store_index);
+
+  /*!
+   * \brief access the internal node container
+   * \return the pointer to the internal node container
+   */
+  inline const DataLayoutNode* operator->() const;
+
+  /*! \brief specify container node */
+  using ContainerType = DataLayoutNode;
+};
+
+struct DataLayoutNode : public Node {
+  // The original axis, with symbolic shape
+  Array<IterVar> orig_axis;
+  // The shape of the stored array
+//  Array<Expr> shape;
+  // expression of each location, on how original location can be mapped
+  // to the store location, example
+  // [i0 / 16, i1, i0 % 16]
+  Array<Expr> store_axis;
+
+  std::string orig_layout;
+  std::string store_layout;
+
+  void VisitAttrs(AttrVisitor* v) final {
+    v->Visit("orig_axis", &orig_axis);
+//    v->Visit("shape", &shape);
+    v->Visit("store_axis", &store_axis);
+    v->Visit("orig_layout", &orig_layout);
+    v->Visit("store_layout", &store_layout);
+  }
+
+  TVM_DLL static DataLayout make(const std::string& orig_layout,
+                                 const std::string& store_layout);
+
+  static constexpr const char* _type_key = "DataLayout";
+  TVM_DECLARE_NODE_TYPE_INFO(DataLayoutNode, Node);
+};
+
 }  // namespace tvm
 #endif  // TVM_BUFFER_H_
