@@ -411,10 +411,70 @@ Buffer BufferNode::make(Var data,
   return Buffer(n);
 }
 
-DataLayout DataLayoutNode::make(const std::string& layout,
+DataLayout DataLayoutNode::make(const std::string& orig_layout,
                                 const std::string& store_layout) {
   auto n = make_node<DataLayoutNode>();
 
+  auto LayoutParser = [](const std::string& layout, Array<IterVar>& axes) {
+    std::vector<int32_t> axis_factor(256, -1);
+    int32_t factor = 0;
+    for (size_t i = 0; i < layout.size(); ++i) {
+      const char axis_name = layout.at(i);
+      if (axis_name >= 'A' && axis_name <= 'Z') {
+        CHECK_EQ(axis_factor[axis_name], -1) << "Invalid layout " << layout
+                                             << ": duplicated axis " << axis_name;
+        CHECK_EQ(factor, 0) << "Invalid layout " << layout
+                            << ": invalid factor size " << factor
+                            << " before dimension " << axis_name;
+        IterVar axis = IterVarNode::make(Range(Expr(0), Expr(0)),
+                                         Var(std::string(1, axis_name)), kDataPar);
+        axes.push_back(axis);
+        axis_factor[axis_name] = 0;
+      } else if (axis_name >= 'a' && axis_name <= 'z') {
+        CHECK_EQ(axis_factor[axis_name], -1) << "Invalid layout " << layout
+                                             << ": duplicated axis " << axis_name;
+        CHECK_GT(factor, 0) << "Invalid layout " << layout << ": invalid factor size "
+                            << factor << " for dimension " << axis_name;
+        IterVar axis = IterVarNode::make(Range(Expr(0), Expr(factor)),
+                                         Var(std::string(1, axis_name)), kDataPar);
+        axes.push_back(axis);
+        axis_factor[axis_name] = factor;
+        factor = 0;
+      } else if (axis_name >= '0' && axis_name <= '9') {
+        CHECK(factor >= 0) << "Invalid layout " << layout << ": _ is adjacent to a number.";
+        factor = factor * 10 + axis_name - '0';
+      } else {
+        LOG(FATAL) << "Invalid layout " << layout;
+      }
+    }
+    // assign major (upper-case) axis's extent to be the same as it's related minor axis
+    for (size_t i = 0; i < axes.size(); ++i) {
+      const char axis_name = axes[i]->var.get()->name_hint.at(0);
+      if (axis_name >= 'A' && axis_name <= 'Z') {
+        const char minor_axis_name = axis_name - 'A' + 'a';
+        int32_t minor_factor = axis_factor[minor_axis_name];
+        if (minor_factor > 0) {
+          IterVar axis = IterVarNode::make(Range(Expr(0), Expr(minor_factor)),
+                                           axes[i]->var, kDataPar);
+          axes.Set(i, axis);
+        }
+      }
+    }
+  };
+
+  n->orig_layout = orig_layout;
+  LayoutParser(orig_layout, n->orig_axis);
+
+  n->store_layout = store_layout;
+  Array<IterVar> store_axis;
+  LayoutParser(store_layout, store_axis);
+
+  for (const IterVar& axis : store_axis) {
+    for (const IterVar& orig_axis : n->orig_axis) {
+    }
+  }
+
+  /*
   static const uint32_t kUniqueDim = 26;
   std::vector<int32_t> superdim_pos(kUniqueDim, -1);
   std::vector<int32_t> subdim_pos(kUniqueDim, -1);
@@ -453,6 +513,7 @@ DataLayout DataLayoutNode::make(const std::string& layout,
       LOG(FATAL) << "Invalid layout " << layout;
     }
   }
+  */
 
   return DataLayout(n);
 }

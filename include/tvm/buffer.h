@@ -167,7 +167,7 @@ TVM_DLL Buffer decl_buffer(Array<Expr> shape,
 
 
 class DataLayout : public NodeRef {
-public:
+ public:
   DataLayout() {}
   explicit DataLayout(NodePtr<Node> n) : NodeRef(n) {}
 
@@ -188,7 +188,8 @@ public:
   using ContainerType = DataLayoutNode;
 };
 
-struct DataLayoutNode : public Node {
+class DataLayoutNode : public Node {
+ public:
   // The original axis, with symbolic shape
   Array<IterVar> orig_axis;
   // The shape of the stored array
