@@ -426,7 +426,7 @@ DataLayout DataLayoutNode::make(const std::string& orig_layout,
         CHECK_EQ(factor, 0) << "Invalid layout " << layout
                             << ": invalid factor size " << factor
                             << " before dimension " << axis_name;
-        IterVar axis = IterVarNode::make(Range(Expr(0), Expr(0)),
+        IterVar axis = IterVarNode::make(Range(Expr(0), Expr(1)),
                                          Var(std::string(1, axis_name)), kDataPar);
         axes.push_back(axis);
         axis_factor[axis_name] = 0;
@@ -449,11 +449,11 @@ DataLayout DataLayoutNode::make(const std::string& orig_layout,
     }
     // assign major (upper-case) axis's extent to be the same as it's related minor axis
     for (size_t i = 0; i < axes.size(); ++i) {
-      const char axis_name = axes[i]->var.get()->name_hint.at(0);
+      const char axis_name = GetAxisName(axes[i]);
       if (axis_name >= 'A' && axis_name <= 'Z') {
         const char minor_axis_name = axis_name - 'A' + 'a';
         int32_t minor_factor = axis_factor[minor_axis_name];
-        if (minor_factor > 0) {
+        if (minor_factor > 1) {
           IterVar axis = IterVarNode::make(Range(Expr(0), Expr(minor_factor)),
                                            axes[i]->var, kDataPar);
           axes.Set(i, axis);
@@ -470,50 +470,28 @@ DataLayout DataLayoutNode::make(const std::string& orig_layout,
   LayoutParser(store_layout, store_axis);
 
   for (const IterVar& axis : store_axis) {
+    Expr store(0);
     for (const IterVar& orig_axis : n->orig_axis) {
+      if (Match(axis, orig_axis)) {
+        if (IsMajorAxis(orig_axis)) {
+          store = store + (orig_axis->var * orig_axis->dom->extent);
+        } else {
+          store = store + orig_axis->var;
+        }
+      }
     }
-  }
-
-  /*
-  static const uint32_t kUniqueDim = 26;
-  std::vector<int32_t> superdim_pos(kUniqueDim, -1);
-  std::vector<int32_t> subdim_pos(kUniqueDim, -1);
-  std::vector<int64_t> subdim_size(kUniqueDim, -1);
-  std::vector<char> layout_simplified;
-
-  int32_t factor = 0;
-  uint32_t curr = 0;
-  for (size_t i = 0; i < layout.size(); ++i) {
-    const char axis = layout.at(i);
-    if (axis >= 'A' && axis <= 'Z') {
-      int pos = axis - 'A';
-      CHECK_EQ(factor, 0) << "Invalid layout " << layout
-                          << ": invalid factor size " << factor
-                          << " before dimension " << axis;
-      CHECK_EQ(superdim_pos[pos], -1) << "Invalid layout " << layout
-                                      << ": duplicate dimension " << axis;
-      superdim_pos[pos] = curr++;
-      layout_simplified.push_back(axis);
-    } else if (axis >= 'a' && axis <= 'z') {
-      int pos = axis - 'a';
-      CHECK_GT(factor, 0) << "Invalid layout " << layout << ": invalid factor size "
-                          << factor << " for dimension " << axis;
-      CHECK_EQ(subdim_pos[pos], -1) << "Invalid layout " << layout
-                                    << ": duplicate dimension " << axis;
-      CHECK_EQ(subdim_size[pos], -1) << "Invalid layout " << layout
-                                     << ": duplicate dimension " << axis;
-      subdim_pos[pos] = curr++;
-      subdim_size[pos] = factor;
-      layout_simplified.push_back(axis);
-      factor = 0;
-    } else if (axis >= '0' && axis <= '9') {
-      CHECK(factor >= 0) << "Invalid layout " << layout << ": _ is adjacent to a number.";
-      factor = factor * 10 + axis - '0';
+    if (is_zero(store)) {
+      // Not convertible
+      return DataLayout();
+    }
+    if (IsMajorAxis(axis)) {
+      store = store / axis->dom->extent;
     } else {
-      LOG(FATAL) << "Invalid layout " << layout;
+      store = store % axis->dom->extent;
     }
+
+    n->store_axis.push_back(store);
   }
-  */
 
   return DataLayout(n);
 }

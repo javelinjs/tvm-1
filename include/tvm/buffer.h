@@ -215,6 +215,18 @@ class DataLayoutNode : public Node {
 
   static constexpr const char* _type_key = "DataLayout";
   TVM_DECLARE_NODE_TYPE_INFO(DataLayoutNode, Node);
+ private:
+  inline static char GetAxisName(const IterVar& axis) {
+    return axis->var.get()->name_hint.at(0);
+  }
+  inline static bool IsMajorAxis(const IterVar& axis) {
+    return GetAxisName(axis) >= 'A' && GetAxisName(axis) <= 'Z';
+  }
+  inline static bool Match(const IterVar& x, const IterVar& y) {
+    const char x_name = IsMajorAxis(x) ? GetAxisName(x) : GetAxisName(x) - 'a' + 'A';
+    const char y_name = IsMajorAxis(y) ? GetAxisName(y) : GetAxisName(y) - 'a' + 'A';
+    return x_name == y_name;
+  }
 };
 
 }  // namespace tvm
