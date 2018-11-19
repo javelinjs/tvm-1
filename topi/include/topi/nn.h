@@ -465,11 +465,16 @@ inline Tensor layout_transform(const Tensor& src,
                                const FLayoutIndicesTransform& to_src_indices,
                                const std::string name = "layout_transform",
                                const std::string tag = kInjective) {
-  LOG(INFO) << "src_layout = " << src_layout << ", dst_layout = " << dst_layout;
+  DataLayout data_layout = DataLayoutNode::make(src_layout, dst_layout);
   auto src_shape = src->shape;
   return compute(
   dst_shape, [&](const Array<Var>& dst_indices) {
-    return src(to_src_indices(dst_indices));
+    Array<Expr> dst;
+    for (const Var& v : dst_indices) {
+      dst.push_back(v);
+    }
+    auto inferred_src_indices = data_layout.BackwardIndex(dst);
+    return src(data_layout.BackwardIndex(dst));
   }, name, tag);
 }
 

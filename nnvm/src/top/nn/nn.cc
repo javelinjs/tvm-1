@@ -687,7 +687,7 @@ the input array by output[n, c, h, w, C] = data[n, C*16+c, h, w]
                                                 << " to " << param.dst_layout;
 
     return Array<Tensor> {
-      topi::layout_transform(inputs[0], param.src_layout, param.dst_layout, outputs[0]->shape, [&](const Array<Var>& dst_indices) {
+      topi::layout_transform(inputs[0], outputs[0]->shape, param.src_layout, param.dst_layout, [&](const Array<Var>& dst_indices) {
         std::vector<Expr> dst_to_src_indices;
         for (Layout::LayoutDim src_axis : src_layout) {
           int dst_major_pos = dst_layout.indexof(Layout::to_superdim(src_axis));

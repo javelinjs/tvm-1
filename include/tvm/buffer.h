@@ -172,11 +172,11 @@ class DataLayout : public NodeRef {
   explicit DataLayout(NodePtr<Node> n) : NodeRef(n) {}
 
   // Final shape of the underlying array, given the shape of the normal layout
-  TVM_DLL Array<Expr> ForwardShape(const Array<Expr>& shape);
+//  TVM_DLL Array<Expr> ForwardShape(const Array<Expr>& shape);
   // Final index of the underlying array, given the normal layout.
-  TVM_DLL Array<Expr> ForwardIndex(const Array<Expr>& index);
+  TVM_DLL Array<Expr> ForwardIndex(const Array<Expr>& index) const;
   // Given store index, recover the original representation space index.
-  TVM_DLL Array<Expr> BackwardIndex(const Array<Expr>& store_index);
+  TVM_DLL Array<Expr> BackwardIndex(const Array<Expr>& store_index) const;
 
   /*!
    * \brief access the internal node container
@@ -207,7 +207,7 @@ class DataLayoutNode : public Node {
   void VisitAttrs(AttrVisitor* v) final {
     v->Visit("orig_axis", &orig_axis);
 //    v->Visit("shape", &shape);
-//    v->Visit("store_axis", &store_axis);
+    v->Visit("store_axis", &store_axis);
     v->Visit("orig_layout", &orig_layout);
     v->Visit("store_layout", &store_layout);
   }
@@ -217,6 +217,7 @@ class DataLayoutNode : public Node {
 
   static constexpr const char* _type_key = "DataLayout";
   TVM_DECLARE_NODE_TYPE_INFO(DataLayoutNode, Node);
+
  private:
   inline static char GetAxisName(const IterVar& axis) {
     return axis->var.get()->name_hint.at(0);
@@ -257,6 +258,10 @@ class DataLayoutNode : public Node {
     return true;
   }
 };
+
+inline const DataLayoutNode* DataLayout::operator->() const {
+  return static_cast<const DataLayoutNode*>(node_.get());
+}
 
 }  // namespace tvm
 #endif  // TVM_BUFFER_H_

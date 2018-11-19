@@ -411,7 +411,7 @@ Buffer BufferNode::make(Var data,
   return Buffer(n);
 }
 
-Array<Expr> DataLayout::ForwardIndex(const Array<Expr>& orig_index) {
+Array<Expr> DataLayout::ForwardIndex(const Array<Expr>& orig_index) const {
   const DataLayoutNode* self = operator->();
   CHECK_EQ(orig_index.size(), self->orig_axis.size())
     << "Input mismatch with layout " << self->orig_layout;
@@ -427,7 +427,7 @@ Array<Expr> DataLayout::ForwardIndex(const Array<Expr>& orig_index) {
 }
 
 
-Array<Expr> DataLayout::BackwardIndex(const Array<Expr>& store_index) {
+Array<Expr> DataLayout::BackwardIndex(const Array<Expr>& store_index) const {
   const DataLayoutNode* self = operator->();
   CHECK_EQ(store_index.size(), self->store_axis.size())
     << "Output mismatch with layout " << self->store_layout;
