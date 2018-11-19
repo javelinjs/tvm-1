@@ -172,11 +172,11 @@ class DataLayout : public NodeRef {
   explicit DataLayout(NodePtr<Node> n) : NodeRef(n) {}
 
   // Final shape of the underlying array, given the shape of the normal layout
-  TVM_DLL Array<Expr> ForwardShape(Array<Expr> shape);
+  TVM_DLL Array<Expr> ForwardShape(const Array<Expr>& shape);
   // Final index of the underlying array, given the normal layout.
-  TVM_DLL Array<Expr> ForwardIndex(Array<Expr> index);
+  TVM_DLL Array<Expr> ForwardIndex(const Array<Expr>& index);
   // Given store index, recover the original representation space index.
-  TVM_DLL Array<Expr> BackwardIndex(Array<Expr> store_index);
+  TVM_DLL Array<Expr> BackwardIndex(const Array<Expr>& store_index);
 
   /*!
    * \brief access the internal node container
@@ -192,12 +192,14 @@ class DataLayoutNode : public Node {
  public:
   // The original axis, with symbolic shape
   Array<IterVar> orig_axis;
+  Array<IterVar> store_axis;
   // The shape of the stored array
 //  Array<Expr> shape;
   // expression of each location, on how original location can be mapped
   // to the store location, example
   // [i0 / 16, i1, i0 % 16]
-  Array<Expr> store_axis;
+  Array<Expr> forward_rule;
+  Array<Expr> backward_rule;
 
   std::string orig_layout;
   std::string store_layout;
@@ -205,7 +207,7 @@ class DataLayoutNode : public Node {
   void VisitAttrs(AttrVisitor* v) final {
     v->Visit("orig_axis", &orig_axis);
 //    v->Visit("shape", &shape);
-    v->Visit("store_axis", &store_axis);
+//    v->Visit("store_axis", &store_axis);
     v->Visit("orig_layout", &orig_layout);
     v->Visit("store_layout", &store_layout);
   }
@@ -226,6 +228,33 @@ class DataLayoutNode : public Node {
     const char x_name = IsMajorAxis(x) ? GetAxisName(x) : GetAxisName(x) - 'a' + 'A';
     const char y_name = IsMajorAxis(y) ? GetAxisName(y) : GetAxisName(y) - 'a' + 'A';
     return x_name == y_name;
+  }
+  inline static bool GetStoreRule(Array<Expr>& rule,
+                                  const Array<IterVar>& orig_axes,
+                                  const Array<IterVar>& store_axes) {
+    for (const IterVar& axis : store_axes) {
+      Expr store(0);
+      for (const IterVar& orig_axis : orig_axes) {
+        if (Match(axis, orig_axis)) {
+          if (IsMajorAxis(orig_axis)) {
+            store = store + (orig_axis->var * orig_axis->dom->extent);
+          } else {
+            store = store + orig_axis->var;
+          }
+        }
+      }
+      if (is_zero(store)) {
+        // Not convertible
+        return false;
+      }
+      if (IsMajorAxis(axis)) {
+        store = store / axis->dom->extent;
+      } else {
+        store = store % axis->dom->extent;
+      }
+      rule.push_back(store);
+    }
+    return true;
   }
 };
 

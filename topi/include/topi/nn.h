@@ -14,6 +14,7 @@
 #include "tvm/ir.h"
 #include "tvm/ir_pass.h"
 #include "tvm/tvm.h"
+#include "tvm/buffer.h"
 
 namespace topi {
 using namespace tvm;
@@ -459,9 +460,12 @@ using FLayoutIndicesTransform = std::function<Array<Expr>(const Array<Var>& indi
  */
 inline Tensor layout_transform(const Tensor& src,
                                const Array<Expr>& dst_shape,
+                               const std::string& src_layout,
+                               const std::string& dst_layout,
                                const FLayoutIndicesTransform& to_src_indices,
                                const std::string name = "layout_transform",
                                const std::string tag = kInjective) {
+  LOG(INFO) << "src_layout = " << src_layout << ", dst_layout = " << dst_layout;
   auto src_shape = src->shape;
   return compute(
   dst_shape, [&](const Array<Var>& dst_indices) {

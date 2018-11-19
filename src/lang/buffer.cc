@@ -411,6 +411,37 @@ Buffer BufferNode::make(Var data,
   return Buffer(n);
 }
 
+Array<Expr> DataLayout::ForwardIndex(const Array<Expr>& orig_index) {
+  const DataLayoutNode* self = operator->();
+  CHECK_EQ(orig_index.size(), self->orig_axis.size())
+    << "Input mismatch with layout " << self->orig_layout;
+  Array<Expr> result;
+  std::unordered_map<const Variable*, Expr> bind_map;
+  for (size_t i = 0; i < orig_index.size(); ++i) {
+    bind_map[self->orig_axis[i]->var.get()] = orig_index[i];
+  }
+  for (Expr expr : self->forward_rule) {
+    result.push_back(ir::Substitute(expr, bind_map));
+  }
+  return result;
+}
+
+
+Array<Expr> DataLayout::BackwardIndex(const Array<Expr>& store_index) {
+  const DataLayoutNode* self = operator->();
+  CHECK_EQ(store_index.size(), self->store_axis.size())
+    << "Output mismatch with layout " << self->store_layout;
+  Array<Expr> result;
+  std::unordered_map<const Variable*, Expr> bind_map;
+  for (size_t i = 0; i < store_index.size(); ++i) {
+    bind_map[self->store_axis[i]->var.get()] = store_index[i];
+  }
+  for (Expr expr : self->backward_rule) {
+    result.push_back(ir::Substitute(expr, bind_map));
+  }
+  return result;
+}
+
 DataLayout DataLayoutNode::make(const std::string& orig_layout,
                                 const std::string& store_layout) {
   auto n = make_node<DataLayoutNode>();
@@ -466,32 +497,13 @@ DataLayout DataLayoutNode::make(const std::string& orig_layout,
   LayoutParser(orig_layout, n->orig_axis);
 
   n->store_layout = store_layout;
-  Array<IterVar> store_axis;
-  LayoutParser(store_layout, store_axis);
+  LayoutParser(store_layout, n->store_axis);
 
-  for (const IterVar& axis : store_axis) {
-    Expr store(0);
-    for (const IterVar& orig_axis : n->orig_axis) {
-      if (Match(axis, orig_axis)) {
-        if (IsMajorAxis(orig_axis)) {
-          store = store + (orig_axis->var * orig_axis->dom->extent);
-        } else {
-          store = store + orig_axis->var;
-        }
-      }
-    }
-    if (is_zero(store)) {
-      // Not convertible
-      return DataLayout();
-    }
-    if (IsMajorAxis(axis)) {
-      store = store / axis->dom->extent;
-    } else {
-      store = store % axis->dom->extent;
-    }
-
-    n->store_axis.push_back(store);
+  if (!GetStoreRule(n->forward_rule, n->orig_axis, n->store_axis)) {
+    // not convertible
+    return DataLayout();
   }
+  CHECK(GetStoreRule(n->backward_rule, n->store_axis, n->orig_axis));
 
   return DataLayout(n);
 }
