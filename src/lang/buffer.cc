@@ -442,6 +442,12 @@ Array<Expr> DataLayout::BackwardIndex(const Array<Expr>& store_index) const {
   return result;
 }
 
+Array<Expr> DataLayout::ForwardShape(const Array<Expr>& shape) const {
+  const DataLayoutNode* self = operator->();
+  CHECK_EQ(shape.size(), self->orig_axis.size());
+  // TODO
+}
+
 DataLayout DataLayoutNode::make(const std::string& orig_layout,
                                 const std::string& store_layout) {
   auto n = make_node<DataLayoutNode>();
@@ -457,7 +463,8 @@ DataLayout DataLayoutNode::make(const std::string& orig_layout,
         CHECK_EQ(factor, 0) << "Invalid layout " << layout
                             << ": invalid factor size " << factor
                             << " before dimension " << axis_name;
-        IterVar axis = IterVarNode::make(Range(Expr(0), Expr(1)),
+        const std::string shape_name(std::string(1, axis_name) + "_shape");
+        IterVar axis = IterVarNode::make(Range(Expr(0), Var(shape_name)),
                                          Var(std::string(1, axis_name)), kDataPar);
         axes.push_back(axis);
         axis_factor[axis_name] = 0;
@@ -476,19 +483,6 @@ DataLayout DataLayoutNode::make(const std::string& orig_layout,
         factor = factor * 10 + axis_name - '0';
       } else {
         LOG(FATAL) << "Invalid layout " << layout;
-      }
-    }
-    // assign major (upper-case) axis's extent to be the same as it's related minor axis
-    for (size_t i = 0; i < axes.size(); ++i) {
-      const char axis_name = GetAxisName(axes[i]);
-      if (axis_name >= 'A' && axis_name <= 'Z') {
-        const char minor_axis_name = axis_name - 'A' + 'a';
-        int32_t minor_factor = axis_factor[minor_axis_name];
-        if (minor_factor > 1) {
-          IterVar axis = IterVarNode::make(Range(Expr(0), Expr(minor_factor)),
-                                           axes[i]->var, kDataPar);
-          axes.Set(i, axis);
-        }
       }
     }
   };

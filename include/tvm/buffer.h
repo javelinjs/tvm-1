@@ -172,7 +172,7 @@ class DataLayout : public NodeRef {
   explicit DataLayout(NodePtr<Node> n) : NodeRef(n) {}
 
   // Final shape of the underlying array, given the shape of the normal layout
-//  TVM_DLL Array<Expr> ForwardShape(const Array<Expr>& shape);
+  TVM_DLL Array<Expr> ForwardShape(const Array<Expr>& shape) const;
   // Final index of the underlying array, given the normal layout.
   TVM_DLL Array<Expr> ForwardIndex(const Array<Expr>& index) const;
   // Given store index, recover the original representation space index.
@@ -238,7 +238,14 @@ class DataLayoutNode : public Node {
       for (const IterVar& orig_axis : orig_axes) {
         if (Match(axis, orig_axis)) {
           if (IsMajorAxis(orig_axis)) {
-            store = store + (orig_axis->var * orig_axis->dom->extent);
+            Expr orig_var = orig_axis->var;
+            // TODO: avoid for loop
+            for (const IterVar& temp_axis : orig_axes) {
+              if (!IsMajorAxis(temp_axis) && Match(temp_axis, orig_axis)) {
+                orig_var = orig_var * temp_axis->dom->extent;
+              }
+            }
+            store = store + orig_var;
           } else {
             store = store + orig_axis->var;
           }
@@ -249,13 +256,43 @@ class DataLayoutNode : public Node {
         return false;
       }
       if (IsMajorAxis(axis)) {
-        store = store / axis->dom->extent;
+        // TODO: avoid for loop
+        for (const IterVar& temp_axis : store_axes) {
+          if (!IsMajorAxis(temp_axis) && Match(temp_axis, axis)) {
+            store = store / temp_axis->dom->extent;
+          }
+        }
       } else {
         store = store % axis->dom->extent;
       }
       rule.push_back(store);
     }
     return true;
+  }
+  inline static bool GetShapeRule(Array<Expr>& rule,
+                                  const Array<IterVar>& orig_axes,
+                                  const Array<IterVar>& store_axes) {
+    for (const IterVar& axis : store_axes) {
+      if (IsMajorAxis(axis)) {
+        Expr store(1);
+        for (const IterVar &orig_axis : orig_axes) {
+          if (Match(axis, orig_axis)) {
+            store = store * orig_axis->dom->extent;
+          }
+        }
+        if (is_one(store)) {
+          // Not convertible
+          return false;
+        }
+        for (const IterVar& temp_axis : store_axes) {
+          if (!IsMajorAxis(temp_axis) && Match(temp_axis, axis)) {
+            store = store / temp_axis->dom->extent;
+          }
+        }
+      } else {
+      }
+      rule.push_back(store);
+    }
   }
 };
 
