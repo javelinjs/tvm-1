@@ -141,6 +141,15 @@ class Buffer(NodeBase):
 
 
 @register_node
+class DataLayout(NodeBase):
+    def forward_shape(self, shape):
+        return _api_internal._DataLayoutForwardShape(self, shape)
+
+    def backward_shape(self, shape):
+        return _api_internal._DataLayoutBackwardShape(self, shape)
+
+
+@register_node
 class Split(NodeBase):
     """Split operation on axis."""
     pass

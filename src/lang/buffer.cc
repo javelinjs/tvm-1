@@ -442,10 +442,57 @@ Array<Expr> DataLayout::BackwardIndex(const Array<Expr>& store_index) const {
   return result;
 }
 
+inline Array<Expr> TransformShape(const Array<Expr>& src_shape,
+                                  const Array<IterVar>& src_axis,
+                                  const Array<IterVar>& target_axis,
+                                  const Array<Expr>& transform_rule) {
+  CHECK_EQ(src_shape.size(), src_axis.size());
+  // bind variables for original axes
+  // for major-axis, bind the corresponding size
+  // for minor-axis, simply bind it as 0, so that we can reuse forward/backward_rule,
+  // e.g., (C * 16 + c) / 32
+  std::unordered_map<const Variable*, Expr> bind_map;
+  for (size_t i = 0; i < src_shape.size(); ++i) {
+    Expr orig_shape = src_shape[i];
+    IterVar orig_axis = src_axis[i];
+    if (!DataLayoutNode::IsMajorAxis(orig_axis)) {
+      /* TODO
+      if (orig_shape.defined()) {
+        CHECK_EQ(orig_shape, orig_axis->dom->extent) << "Input shape mismatch at index " << i
+                                                     << ". Expected " << orig_axis->dom->extent
+                                                     << ", get " << orig_shape;
+      }
+      */
+      bind_map[orig_axis->var.get()] = Expr(0);
+    } else {
+      bind_map[orig_axis->var.get()] = orig_shape;
+    }
+  }
+  // infer the target shape,
+  // for major-axis, use the forward/backward_rule directly,
+  // for minor-axis, simply use the extent.
+  Array<Expr> result;
+  CHECK_EQ(transform_rule.size(), target_axis.size());
+  for (size_t i = 0; i < transform_rule.size(); ++i) {
+    Expr rule = transform_rule[i];
+    IterVar axis = target_axis[i];
+    if (!DataLayoutNode::IsMajorAxis(axis)) {
+      result.push_back(axis->dom->extent);
+    } else {
+      result.push_back(ir::Simplify(ir::Substitute(rule, bind_map)));
+    }
+  }
+  return result;
+}
+
 Array<Expr> DataLayout::ForwardShape(const Array<Expr>& shape) const {
   const DataLayoutNode* self = operator->();
-  CHECK_EQ(shape.size(), self->orig_axis.size());
-  // TODO
+  return TransformShape(shape, self->orig_axis, self->store_axis, self->forward_rule);
+}
+
+Array<Expr> DataLayout::BackwardShape(const Array<Expr>& shape) const {
+  const DataLayoutNode* self = operator->();
+  return TransformShape(shape, self->store_axis, self->orig_axis, self->backward_rule);
 }
 
 DataLayout DataLayoutNode::make(const std::string& orig_layout,

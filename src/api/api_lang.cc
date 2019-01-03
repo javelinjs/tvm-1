@@ -224,6 +224,23 @@ TVM_REGISTER_API("_BufferVStore")
         .vstore(args[1], args[2]);
   });
 
+TVM_REGISTER_API("_DataLayout")
+.set_body([](TVMArgs args,  TVMRetValue* ret) {
+  *ret = DataLayoutNode::make(args[0], args[1]);
+});
+
+TVM_REGISTER_API("_DataLayoutForwardShape")
+.set_body([](TVMArgs args,  TVMRetValue* ret) {
+  *ret = args[0].operator DataLayout()
+      .ForwardShape(args[1]);
+});
+
+TVM_REGISTER_API("_DataLayoutBackwardShape")
+.set_body([](TVMArgs args,  TVMRetValue* ret) {
+  *ret = args[0].operator DataLayout()
+      .BackwardShape(args[1]);
+});
+
 TVM_REGISTER_API("_Tensor")
 .set_body([](TVMArgs args,  TVMRetValue* ret) {
     *ret = TensorNode::make(args[0],

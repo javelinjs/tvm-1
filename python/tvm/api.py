@@ -556,6 +556,11 @@ def decl_buffer(shape,
         data, dtype, shape, strides, elem_offset, name, scope,
         data_alignment, offset_factor)
 
+
+def decl_layout(src_layout, target_layout):
+    return _api_internal._DataLayout(src_layout, target_layout)
+
+
 def _IterVar(dom, name, iter_type, thread_tag=''):
     """Internal function to create IterVar
 

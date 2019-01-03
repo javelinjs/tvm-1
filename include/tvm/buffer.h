@@ -173,6 +173,8 @@ class DataLayout : public NodeRef {
 
   // Final shape of the underlying array, given the shape of the normal layout
   TVM_DLL Array<Expr> ForwardShape(const Array<Expr>& shape) const;
+  // Given final shape, recover the original shape.
+  TVM_DLL Array<Expr> BackwardShape(const Array<Expr>& shape) const;
   // Final index of the underlying array, given the normal layout.
   TVM_DLL Array<Expr> ForwardIndex(const Array<Expr>& index) const;
   // Given store index, recover the original representation space index.
@@ -218,7 +220,6 @@ class DataLayoutNode : public Node {
   static constexpr const char* _type_key = "DataLayout";
   TVM_DECLARE_NODE_TYPE_INFO(DataLayoutNode, Node);
 
- private:
   inline static char GetAxisName(const IterVar& axis) {
     return axis->var.get()->name_hint.at(0);
   }
@@ -230,6 +231,8 @@ class DataLayoutNode : public Node {
     const char y_name = IsMajorAxis(y) ? GetAxisName(y) : GetAxisName(y) - 'a' + 'A';
     return x_name == y_name;
   }
+
+ private:
   inline static bool GetStoreRule(Array<Expr>& rule,
                                   const Array<IterVar>& orig_axes,
                                   const Array<IterVar>& store_axes) {
@@ -269,6 +272,7 @@ class DataLayoutNode : public Node {
     }
     return true;
   }
+  /*
   inline static bool GetShapeRule(Array<Expr>& rule,
                                   const Array<IterVar>& orig_axes,
                                   const Array<IterVar>& store_axes) {
@@ -294,6 +298,7 @@ class DataLayoutNode : public Node {
       rule.push_back(store);
     }
   }
+  */
 };
 
 inline const DataLayoutNode* DataLayout::operator->() const {
