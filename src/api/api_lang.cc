@@ -229,6 +229,18 @@ TVM_REGISTER_API("_DataLayout")
   *ret = DataLayoutNode::make(args[0], args[1]);
 });
 
+TVM_REGISTER_API("_DataLayoutForwardIndex")
+.set_body([](TVMArgs args,  TVMRetValue* ret) {
+  *ret = args[0].operator DataLayout()
+      .ForwardIndex(args[1]);
+});
+
+TVM_REGISTER_API("_DataLayoutBackwardIndex")
+.set_body([](TVMArgs args,  TVMRetValue* ret) {
+  *ret = args[0].operator DataLayout()
+      .BackwardIndex(args[1]);
+});
+
 TVM_REGISTER_API("_DataLayoutForwardShape")
 .set_body([](TVMArgs args,  TVMRetValue* ret) {
   *ret = args[0].operator DataLayout()

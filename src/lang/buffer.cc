@@ -411,19 +411,25 @@ Buffer BufferNode::make(Var data,
   return Buffer(n);
 }
 
+inline Array<Expr> TransformIndex(const Array<Expr>& src_index,
+                                  const Array<IterVar>& src_axis,
+                                  const Array<Expr>& transform_rule) {
+  Array<Expr> result;
+  std::unordered_map<const Variable*, Expr> bind_map;
+  for (size_t i = 0; i < src_index.size(); ++i) {
+    bind_map[src_axis[i]->var.get()] = src_index[i];
+  }
+  for (Expr rule : transform_rule) {
+    result.push_back(ir::Substitute(rule, bind_map));
+  }
+  return result;
+}
+
 Array<Expr> DataLayout::ForwardIndex(const Array<Expr>& orig_index) const {
   const DataLayoutNode* self = operator->();
   CHECK_EQ(orig_index.size(), self->orig_axis.size())
     << "Input mismatch with layout " << self->orig_layout;
-  Array<Expr> result;
-  std::unordered_map<const Variable*, Expr> bind_map;
-  for (size_t i = 0; i < orig_index.size(); ++i) {
-    bind_map[self->orig_axis[i]->var.get()] = orig_index[i];
-  }
-  for (Expr expr : self->forward_rule) {
-    result.push_back(ir::Substitute(expr, bind_map));
-  }
-  return result;
+  return TransformIndex(orig_index, self->orig_axis, self->forward_rule);
 }
 
 
@@ -431,15 +437,7 @@ Array<Expr> DataLayout::BackwardIndex(const Array<Expr>& store_index) const {
   const DataLayoutNode* self = operator->();
   CHECK_EQ(store_index.size(), self->store_axis.size())
     << "Output mismatch with layout " << self->store_layout;
-  Array<Expr> result;
-  std::unordered_map<const Variable*, Expr> bind_map;
-  for (size_t i = 0; i < store_index.size(); ++i) {
-    bind_map[self->store_axis[i]->var.get()] = store_index[i];
-  }
-  for (Expr expr : self->backward_rule) {
-    result.push_back(ir::Substitute(expr, bind_map));
-  }
-  return result;
+  return TransformIndex(store_index, self->store_axis, self->backward_rule);
 }
 
 inline Array<Expr> TransformShape(const Array<Expr>& src_shape,
