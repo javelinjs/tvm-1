@@ -195,8 +195,6 @@ class DataLayoutNode : public Node {
   // The original axis, with symbolic shape
   Array<IterVar> orig_axis;
   Array<IterVar> store_axis;
-  // The shape of the stored array
-//  Array<Expr> shape;
   // expression of each location, on how original location can be mapped
   // to the store location, example
   // [i0 / 16, i1, i0 % 16]
@@ -208,7 +206,6 @@ class DataLayoutNode : public Node {
 
   void VisitAttrs(AttrVisitor* v) final {
     v->Visit("orig_axis", &orig_axis);
-//    v->Visit("shape", &shape);
     v->Visit("store_axis", &store_axis);
     v->Visit("orig_layout", &orig_layout);
     v->Visit("store_layout", &store_layout);
@@ -272,33 +269,6 @@ class DataLayoutNode : public Node {
     }
     return true;
   }
-  /*
-  inline static bool GetShapeRule(Array<Expr>& rule,
-                                  const Array<IterVar>& orig_axes,
-                                  const Array<IterVar>& store_axes) {
-    for (const IterVar& axis : store_axes) {
-      if (IsMajorAxis(axis)) {
-        Expr store(1);
-        for (const IterVar &orig_axis : orig_axes) {
-          if (Match(axis, orig_axis)) {
-            store = store * orig_axis->dom->extent;
-          }
-        }
-        if (is_one(store)) {
-          // Not convertible
-          return false;
-        }
-        for (const IterVar& temp_axis : store_axes) {
-          if (!IsMajorAxis(temp_axis) && Match(temp_axis, axis)) {
-            store = store / temp_axis->dom->extent;
-          }
-        }
-      } else {
-      }
-      rule.push_back(store);
-    }
-  }
-  */
 };
 
 inline const DataLayoutNode* DataLayout::operator->() const {

@@ -420,7 +420,7 @@ inline Array<Expr> TransformIndex(const Array<Expr>& src_index,
     bind_map[src_axis[i]->var.get()] = src_index[i];
   }
   for (Expr rule : transform_rule) {
-    result.push_back(ir::Substitute(rule, bind_map));
+    result.push_back(ir::Simplify(ir::Substitute(rule, bind_map)));
   }
   return result;
 }
