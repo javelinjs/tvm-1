@@ -411,6 +411,39 @@ def test_alter_layout_concatenate():
 
     assert(alpha_equal(a, b))
 
+def test_alter_layout_dense():
+    """ """
+    def before():
+        x = relay.var("x", shape=(1, 64))
+        w = relay.var("w", shape=(32, 64))
+        ret = relay.nn.dense(x, w, units=32)
+        y = relay.Function(free_vars(ret), ret)
+        return y
+
+    @register_alter_op_layout("nn.dense", level=100)
+    def alter_dense(attrs, inputs, tinfos):
+        data, weight = inputs
+        weight = relay.nn.relu(weight)
+        return relay.nn.dense(data, weight, units=32)
+
+    def expected():
+        x = relay.var("x", shape=(1, 64))
+        w = relay.var("w", shape=(32, 64))
+        w = relay.nn.relu(w)
+        ret = relay.nn.dense(x, w, units=32)
+        y = relay.Function(free_vars(ret), ret)
+        return y
+
+    a = before()
+    a = infer_type(a)
+    a = alter_op_layout(a)
+    a = infer_type(a)
+
+    b = expected()
+    b = infer_type(b)
+
+    assert(alpha_equal(a, b))
+
 if __name__ == "__main__":
     test_alter_op()
     test_alter_return_none()
@@ -420,3 +453,4 @@ if __name__ == "__main__":
     test_alter_layout_broadcast_op()
     test_alter_layout_scalar()
     test_alter_layout_concatenate()
+    test_alter_layout_dense()

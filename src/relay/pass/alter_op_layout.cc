@@ -118,6 +118,7 @@ RELAY_DEFINE_NODE_REF(LayoutAlternatedExpr, LayoutAlternatedExprNode, TempExpr);
 // Returns inferred_input_layout, inferred_output_layout, success
 std::tuple<Array<Layout>, Array<Layout>, bool> CallInfer(
     const Call& call,
+    const size_t num_output,
     const Array<Layout>& new_in_layouts,
     const Array<Layout>& old_in_layouts,
     const Array<Array<IndexExpr> > &old_in_shapes) {
@@ -133,13 +134,14 @@ std::tuple<Array<Layout>, Array<Layout>, bool> CallInfer(
     for (auto x : inferred_layouts) {
       for (auto y : x) {
         if (!y.defined()) {  // inference fails
-          return std::make_tuple<>(Array<Layout>(nullptr), Array<Layout>(nullptr), false);
+          return std::make_tuple<>(old_in_layouts,
+                                   Array<Layout>(num_output, Layout::Undef()), false);
         }
       }
     }
     return std::make_tuple<>(inferred_layouts[0], inferred_layouts[1], true);
   } else {
-    return std::make_tuple<>(Array<Layout>(nullptr), Array<Layout>(nullptr), false);
+    return std::make_tuple<>(old_in_layouts, Array<Layout>(num_output, Layout::Undef()), false);
   }
 }
 
@@ -180,6 +182,9 @@ Expr AlterOpLayoutRewrite(const Call &ref_call,
   std::vector<LayoutAlternatedExpr> inputs;
   std::vector<Expr> normal_new_args;
   Array<Array<IndexExpr> > input_shapes;
+
+  const size_t num_output = ref_call->checked_type()->is_type<TupleTypeNode>() ?
+                            ref_call->type_as<TupleTypeNode>()->fields.size() : 1;
 
   // NOTE: discard the "const" qualifier
   TransformMemorizer memorizer = Downcast<TransformMemorizer>(ctx);
@@ -236,10 +241,23 @@ Expr AlterOpLayoutRewrite(const Call &ref_call,
 
   // old_in, old_out = op.infer(old_in)
   bool success = false;
-  std::tie(old_in, old_out, success) = CallInfer(ref_call,
-                                                 Array<Layout>(nullptr),
-                                                 old_in, input_shapes);
-  if (!success) { return Expr(nullptr); }
+  Array<Layout> inferred_old_layout;
+  std::tie(inferred_old_layout, old_out, success) = CallInfer(ref_call, num_output,
+                                                              Array<Layout>(nullptr),
+                                                              old_in, input_shapes);
+  if (success) {
+    CHECK_EQ(old_in.size(), inferred_old_layout.size());
+    for (size_t i = 0; i < old_in.size(); ++i) {
+      if (old_in[i].defined()) {
+        CHECK(old_in[i].Equals(inferred_old_layout[i]))
+          << ref_call->op << " inferred a mismatched layout with its input[" << i << "]."
+          << " Required: " << old_in[i] << ", inferred: " << inferred_old_layout[i] << ".";
+
+      } else {
+        old_in.Set(i, inferred_old_layout[i]);
+      }
+    }
+  }
   CHECK_EQ(old_in.size(), new_in.size());
 
   // if new_in == 'undef':  new_in = old_in
@@ -255,8 +273,8 @@ Expr AlterOpLayoutRewrite(const Call &ref_call,
   // new_in2, new_out = op.infer(new_in)
   if (new_call->op->is_type<OpNode>()) {
     success = false;
-    std::tie(new_in2, new_out, success) = CallInfer(new_call, new_in, old_in, input_shapes);
-    if (!success) { return Expr(nullptr); }
+    std::tie(new_in2, new_out, success) = CallInfer(new_call, num_output,
+                                                    new_in, old_in, input_shapes);
   } else {
     return Expr(nullptr);
   }
