@@ -6,17 +6,15 @@
           custom layouts or other general weight pre-transformation.
  */
 #include <tvm/relay/pass.h>
-#include <tvm/relay/op_attr_types.h>
 #include <tvm/relay/expr_functor.h>
 #include <tvm/relay/attrs/transform.h>
 #include <tvm/tvm.h>
 #include <tuple>
 #include <utility>
 #include <vector>
-#include <functional>
 #include <string>
 
-#include "alter_op_layout.h"
+#include "./alter_op_layout.h"
 
 namespace tvm {
 namespace relay {
@@ -362,11 +360,22 @@ std::tuple<Call, Array<Layout>, bool> CallAlter(const Call& ref_call,
   return std::make_tuple<>(GetRef<Call>(new_call), out_layout, modified);
 }
 
+LayoutAlternatedExpr GetLayoutAlternatedExpr(Expr arg, const TransformMemorizer& memorizer) {
+  if (const LayoutAlternatedExprNode *inp = arg.as<LayoutAlternatedExprNode>()) {
+    return GetRef<LayoutAlternatedExpr>(inp);
+  }
+  auto inode = make_node<LayoutAlternatedExprNode>();
+  inode->value = arg;
+  inode->old_type = arg->checked_type();
+  inode->new_type = arg->checked_type();
+  inode->memorizer = memorizer;
+  return LayoutAlternatedExpr(inode);
+}
+
 Expr AlterOpLayoutRewrite(const Call &ref_call,
                           const Array<Expr> &new_args,
                           const NodeRef& ctx) {
   std::vector<LayoutAlternatedExpr> inputs;
-  std::vector<Expr> normal_new_args;
   Array<Array<IndexExpr> > input_shapes;
 
   const size_t num_output = ref_call->checked_type()->is_type<TupleTypeNode>() ?
@@ -376,36 +385,17 @@ Expr AlterOpLayoutRewrite(const Call &ref_call,
   TransformMemorizer memorizer = Downcast<TransformMemorizer>(ctx);
 
   // fill incomplete state and flatten tuple
-  auto push_back_one_arg = [&inputs, memorizer](Expr arg) {
-    // We always expect LayoutAlternatedExpr.
-    // This is used to convert the normal Expr to LayoutAlternatedExpr.
-    if (const LayoutAlternatedExprNode *inp = arg.as<LayoutAlternatedExprNode>()) {
-      inputs.push_back(GetRef<LayoutAlternatedExpr>(inp));
-      return inp->value;
-    } else {
-      auto inode = make_node<LayoutAlternatedExprNode>();
-      inode->value = arg;
-      inode->old_type = arg->checked_type();
-      inode->new_type = arg->checked_type();
-      inode->memorizer = memorizer;
-      inputs.push_back(LayoutAlternatedExpr(inode));
-      return arg;
-    }
-  };
-
+  // We always expect LayoutAlternatedExpr.
+  // This is used to convert the normal Expr to LayoutAlternatedExpr.
   for (auto new_arg : new_args) {
     // NOTE: do not support nested tuple
     if (new_arg->is_type<TupleNode>()) {
       Tuple tuple_new_arg = Downcast<Tuple>(new_arg);
-      std::vector<Expr> fields;
       for (auto x : tuple_new_arg->fields) {
-        Expr tmp = push_back_one_arg(x);
-        fields.push_back(tmp);
+        inputs.push_back(GetLayoutAlternatedExpr(x, memorizer));
       }
-      normal_new_args.push_back(TupleNode::make(fields));
     } else {
-      Expr tmp = push_back_one_arg(new_arg);
-      normal_new_args.push_back(tmp);
+      inputs.push_back(GetLayoutAlternatedExpr(new_arg, memorizer));
     }
   }
 
