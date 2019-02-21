@@ -146,12 +146,6 @@ std::tuple<Array<Layout>, Array<Layout>, bool> CallInfer(
       }
     }
     */
-    LOG(INFO) << "Success Call=" << call;
-    LOG(INFO) << "Input layouts:";
-    for (size_t i = 0; i < inferred_layouts[0].size(); ++i) {
-      LOG(INFO) << inferred_layouts[0][i];
-    }
-    LOG(INFO) << "----------------";
     return std::make_tuple<>(inferred_layouts[0], inferred_layouts[1], true);
   } else {
     return std::make_tuple<>(old_in_layouts, Array<Layout>(num_output, Layout::Undef()), false);
@@ -170,9 +164,7 @@ class ReplaceArgsMutator : private ExprMutator {
  private:
   Expr VisitExpr_(const VarNode* op) final {
     for (size_t i = 0; i < fake_args_.size(); ++i) {
-      LOG(INFO) << GetRef<Expr>(op) << " V.S. " << fake_args_[i];
       if (op->name_hint() == fake_args_[i].as<VarNode>()->name_hint()) {
-        LOG(INFO) << "replaced by " << real_args_[i];
         return real_args_[i];
       }
     }
@@ -193,11 +185,7 @@ class FixLayoutMutator : private ExprMutator {
   : memorizer_(memorizer),
     args_(std::move(args)),
     new_in_layouts_(std::move(new_in_layouts)),
-    old_in_layouts_(std::move(old_in_layouts)) {
-    for (size_t i = 0; i < new_in_layouts_.size(); ++i) {
-      LOG(INFO) << "Ctor args[" << i << "] new=" << new_in_layouts_[i] << ", old=" << old_in_layouts_[i];
-    }
-  }
+    old_in_layouts_(std::move(old_in_layouts)) {}
 
   Expr Visit(const Expr& expr) { return ExprMutator::Mutate(expr); }
 
@@ -233,7 +221,6 @@ class FixLayoutMutator : private ExprMutator {
       CallInfer(GetRef<Call>(call), 1, new_in_layouts, old_in_layouts, old_in_shapes);
 
     // TODO
-    LOG(INFO) << "Success in FixLayoutMutator's CallInfer = " << success;
     CHECK_EQ(out_layouts.size(), 1);
 
     CHECK_EQ(new_in_layouts.size(), required_in_layouts.size())
@@ -323,28 +310,24 @@ std::tuple<Call, Array<Layout>, bool> CallAlter(const Call& ref_call,
   Array<Expr> real_args;
   Array<Expr> fake_args;
 
-  for (const auto& new_arg : new_args) {
-    real_args.push_back(new_arg->value);
+  tvm::Array<tvm::Tensor> tinfos;
+  for (size_t i = 0; i < new_args.size(); ++i) {
+    auto arg = new_args[i];
+    auto old_type = arg->old_type.as<TensorTypeNode>();
+    auto new_type = arg->new_type.as<TensorTypeNode>();
+    CHECK(old_type && new_type);
+    tinfos.push_back(tvm::placeholder(old_type->shape, old_type->dtype));
+    std::stringstream var_name;
+    // TODO: flatten tuple node?
+    var_name << op->name << "." << op->arguments[i]->name << "." << ref_call.hash() << "#" << i;
+    fake_args.push_back(VarNode::make(var_name.str(),
+                                      TensorTypeNode::make(new_type->shape,
+                                                           new_type->dtype)));
+    real_args.push_back(new_args[i]->value);
   }
 
   if (falter_layout.count(op)) {
     CHECK_EQ(op->arguments.size(), ref_call->args.size());
-    tvm::Array<tvm::Tensor> tinfos;
-    for (size_t i = 0; i < new_args.size(); ++i) {
-      auto arg = new_args[i];
-      auto old_type = arg->old_type.as<TensorTypeNode>();
-      auto new_type = arg->new_type.as<TensorTypeNode>();
-//      LOG(INFO) << "fake arg[" << i << "] old_shape=" << ttype->shape << " new_shape=" << new_args[i]->type_as<TensorTypeNode>()->shape;
-      tinfos.push_back(tvm::placeholder(old_type->shape, old_type->dtype));
-      std::stringstream var_name;
-      // TODO: flatten tuple node?
-      var_name << op->name << "." << op->arguments[i]->name << "." << ref_call.hash() << "#" << i;
-      LOG(INFO) << "var_name = " << var_name.str();
-      fake_args.push_back(VarNode::make(var_name.str(),
-                                        TensorTypeNode::make(new_type->shape,
-                                                             Float(16))));
-//                                                             new_type->dtype)));
-    }
     Expr altered_value = falter_layout[op](ref_call->attrs, fake_args, tinfos);
     if (altered_value.defined()) {
       new_e = altered_value;
@@ -352,22 +335,27 @@ std::tuple<Call, Array<Layout>, bool> CallAlter(const Call& ref_call,
     }
   }
 
-  Array<Layout> out_layout;
   if (!modified) {
-    new_e = CallNode::make(ref_call->op, real_args,
+    new_e = CallNode::make(ref_call->op, fake_args,
                            ref_call->attrs);
-  } else {
-    FixLayoutMutator layout_fixer(memorizer, fake_args, new_in_layouts, old_in_layouts);
-    new_e = layout_fixer.Visit(new_e);
-    out_layout.push_back(new_e.as<LayoutAlternatedExprNode>()->new_layout);
-    new_e = new_e.as<LayoutAlternatedExprNode>()->value;
-    CHECK(new_e->checked_type_.defined());
-    auto ttype = new_e->checked_type_;
-    ReplaceArgsMutator args_replacer(real_args, fake_args);
-    new_e = args_replacer.Visit(new_e);
-    // TODO: is it a good way?
-    new_e->checked_type_ = ttype;
   }
+
+  // fix layout
+  Array<Layout> out_layout;
+  FixLayoutMutator layout_fixer(memorizer, fake_args, new_in_layouts, old_in_layouts);
+  new_e = layout_fixer.Visit(new_e);
+  // TODO: what if it is a tuple node?
+  out_layout.push_back(new_e.as<LayoutAlternatedExprNode>()->new_layout);
+  new_e = new_e.as<LayoutAlternatedExprNode>()->value;
+
+  CHECK(new_e->checked_type_.defined());
+  auto ttype = new_e->checked_type_;
+
+  ReplaceArgsMutator args_replacer(real_args, fake_args);
+  new_e = args_replacer.Visit(new_e);
+  // since arg_replacer does not change the root node's type,
+  // we can simply restore the backup type.
+  new_e->checked_type_ = ttype;
 
   const CallNode *new_call = new_e.as<CallNode>();
   CHECK(new_call) << "Can only replace the original operator with another call node";
@@ -471,50 +459,12 @@ Expr AlterOpLayoutRewrite(const Call &ref_call,
   Call new_call;
   bool altered;
   std::tie(new_call, new_out, altered) = CallAlter(ref_call, inputs, memorizer, new_in, old_in);
+  CHECK_EQ(new_out.size(), old_out.size());
 
   // new_in2, new_out = op.infer(new_in)
   Expr ret = new_call;
-  if (!altered) {
-    if (new_call->op->is_type<OpNode>()) {
-      success = false;
-      std::tie(new_in2, new_out, success) = CallInfer(new_call, num_output,
-                                                      new_in, old_in, input_shapes);
-    } else {
-      LOG(INFO) << "ret2 = " << ret;
-      return Expr(nullptr);
-    }
-
-    CHECK_EQ(new_out.size(), old_out.size())
-      << "The number of output nodes should keep the same during alter_op_layout";
-    CHECK_EQ(new_in.size(), new_in2.size())
-      << "The number of input nodes should keep the same during alter_op_layout";
-
-    // if (new_in != new_in2): insert transform (new_in -> new_in2)
-    Array<Expr> transformed_args;
-    size_t pt = 0;
-    for (auto arg : new_call->args) {
-      if (arg->is_type<TupleNode>()) {  // unflatten tuple
-        Tuple tuple_arg = Downcast<Tuple>(arg);
-        std::vector<Expr> transformed_tuple_arg;
-        for (auto arg_item : tuple_arg->fields) {
-          transformed_tuple_arg.push_back(
-          memorizer.Transform(arg_item, new_in[pt], new_in2[pt]));
-          pt++;
-        }
-        transformed_args.push_back(TupleNode::make(transformed_tuple_arg));
-      } else {
-        transformed_args.push_back(
-        memorizer.Transform(arg, new_in[pt], new_in2[pt]));
-        pt++;
-      }
-    }
-    CHECK_EQ(pt, inputs.size());
-
-    new_call = CallNode::make(new_call->op, transformed_args, new_call->attrs);
-
-    // TODO: efficient way to do (incremental) infer type.
-    // this will change the whole graph, while we should only change the current one:
-    // InferType(new_call, Module());
+  if (!new_call->op->is_type<OpNode>()) {
+    return Expr(nullptr);
   }
 
   LOG(INFO) << "ret = " << ret;
@@ -540,8 +490,7 @@ Expr AlterOpLayoutRewrite(const Call &ref_call,
     rnode->old_layout = old_out[0];
     rnode->new_layout = new_out[0];
     rnode->old_type = ref_call->checked_type();
-    // FIXME: this must be defined
-    if (ret->checked_type_.defined()) rnode->new_type = ret->checked_type();
+    rnode->new_type = ret->checked_type();
     rnode->memorizer = memorizer;
     return Expr(rnode);
   }

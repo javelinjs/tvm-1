@@ -5,9 +5,38 @@ from tvm.relay.op import register_alter_op_layout
 from tvm.relay.ir_pass import *
 
 def assert_alpha_equal(expected, actual):
-    print('---assert')
     assert alpha_equal(expected, actual), "\nExpected:\n" + str(expected) \
                                           + "\nActual:\n" + str(actual)
+
+def test_alter_multiply():
+    def before():
+        x = relay.var("x", shape=(1, 64, 56, 56))
+        y = relay.const(2.0, "float32")
+        ret = relay.multiply(x, y)
+        ret = relay.Function([x], ret)
+        return ret
+
+    @register_alter_op_layout("multiply", level=100)
+    def alter_conv2d(attrs, inputs, tinfos):
+        x, y = inputs
+        return relay.multiply(x, relay.const(3.0, "float32"))
+
+    def expected():
+        x = relay.var("x", shape=(1, 64, 56, 56))
+        y = relay.const(3.0, "float32")
+        ret = relay.multiply(x, y)
+        ret = relay.Function([x], ret)
+        return ret
+
+    a = before()
+    a = infer_type(a)
+    a = alter_op_layout(a)
+
+    b = expected()
+    b = infer_type(b)
+
+    assert_alpha_equal(b, a)
+
 
 def test_alter_op():
     """Test directly replacing an operator with a new one"""
@@ -147,21 +176,21 @@ def test_alter_layout_dual_path():
     def before():
         x = relay.var("x", shape=(1, 64, 56, 56))
         weight1 = relay.var('weight1')
-        # weight2 = relay.var('weight2')
+        weight2 = relay.var('weight2')
         y = relay.nn.conv2d(x, weight1,
                             channels=32,
                             kernel_size=(3, 3),
                             padding=(1, 1))
         y = relay.nn.relu(y)
-        # y1 = relay.nn.conv2d(y, weight2,
-        #                      channels=32,
-        #                      kernel_size=(3, 3),
-        #                      padding=(1, 1))
-        # y1 = relay.nn.relu(y1)
-        # y2 = relay.nn.batch_flatten(y)
-        # ret = relay.Tuple([y1, y2])
-        # y = relay.Function(free_vars(ret), ret)
-        y = relay.Function([x, weight1], y)
+        y1 = relay.nn.conv2d(y, weight2,
+                             channels=32,
+                             kernel_size=(3, 3),
+                             padding=(1, 1))
+        y1 = relay.nn.relu(y1)
+        y2 = relay.nn.batch_flatten(y)
+        ret = relay.Tuple([y1, y2])
+        y = relay.Function(free_vars(ret), ret)
+        # y = relay.Function([x, weight1], y)
         return y
 
     @register_alter_op_layout("nn.conv2d", level=103)
@@ -486,9 +515,10 @@ def test_alter_layout_stacked_op():
     assert_alpha_equal(b, a)
 
 if __name__ == "__main__":
-    # test_alter_op()
-    # test_alter_return_none()
-    # test_alter_layout()
+    test_alter_multiply()
+    test_alter_op()
+    test_alter_return_none()
+    test_alter_layout()
     test_alter_layout_dual_path()
     # test_alter_layout_resnet()
     # test_alter_layout_broadcast_op()

@@ -71,7 +71,7 @@ inline Array<Array<Layout> > BinaryBroadcastLayout(const Attrs& attrs,
   LOG(INFO) << "BinaryBroadcastLayout " << layouts[0] << " " << layouts[0].defined() << " " << layouts[1] << " " << layouts[1].defined();
   if (!layouts[0].defined() && !layouts[1].defined()) {
     // both undefined, infer fails
-    return Array<Array<Layout> > {{Layout::Undef()}, {Layout::Undef()}};
+    return Array<Array<Layout> > {{Layout::Undef(), Layout::Undef()}, {Layout::Undef()}};
   } else if (!layouts[0].defined() || !layouts[1].defined()) {
     // only one is defined, use shape information to help infer
     int defined_idx = layouts[0].defined() ? 0 : 1;
