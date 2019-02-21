@@ -479,7 +479,7 @@ bool TypeSolver::Solve() {
       rnode->resolved = false;
       this->ReportError(
           RELAY_ERROR(
-            "an internal invariant was violdated while" \
+            "an internal invariant was violdated while " \
             "typechecking your program" <<
             err.what()), rnode->location);
     }

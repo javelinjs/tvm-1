@@ -75,7 +75,7 @@ struct ResolvedTypeInfo {
 };
 
 //
-// The inference algorithm can roughly be devided into three stages:
+// The inference algorithm can roughly be divided into three stages:
 // - Populate the constraints by visiting the expression (TypeInferencer.GetType)
 //   - solver.AddConstraint and solver.Unify are called to populate the necessary constraints
 // - Solve the constraints (solver_.Solve)

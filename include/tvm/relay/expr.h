@@ -219,7 +219,7 @@ class FunctionNode : public ExprNode {
   /*!
    * \brief Type parameters of the function.
    *  Enables the function to vary its type based on these.
-   *  This corresponds to template paramaters in c++'s terminology.
+   *  This corresponds to template parameters in c++'s terminology.
    *
    * \note This can be usually empty for non-polymorphic functions.
    */

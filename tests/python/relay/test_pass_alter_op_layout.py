@@ -4,6 +4,11 @@ from tvm import relay
 from tvm.relay.op import register_alter_op_layout
 from tvm.relay.ir_pass import *
 
+def assert_alpha_equal(expected, actual):
+    print('---assert')
+    assert alpha_equal(expected, actual), "\nExpected:\n" + str(expected) \
+                                          + "\nActual:\n" + str(actual)
+
 def test_alter_op():
     """Test directly replacing an operator with a new one"""
     def before():
@@ -41,7 +46,7 @@ def test_alter_op():
     b = expected()
     b = infer_type(b)
 
-    assert(alpha_equal(a, b))
+    assert_alpha_equal(b, a)
 
 
 def test_alter_return_none():
@@ -65,7 +70,7 @@ def test_alter_return_none():
 
     b = before()
     b = infer_type(b)
-    assert(alpha_equal(a, b))
+    assert_alpha_equal(b, a)
     assert(called[0])
 
 
@@ -131,7 +136,7 @@ def test_alter_layout():
     b = expected()
     b = infer_type(b)
 
-    assert(alpha_equal(a, b))
+    assert_alpha_equal(b, a)
 
 
 def test_alter_layout_dual_path():
@@ -142,20 +147,21 @@ def test_alter_layout_dual_path():
     def before():
         x = relay.var("x", shape=(1, 64, 56, 56))
         weight1 = relay.var('weight1')
-        weight2 = relay.var('weight2')
+        # weight2 = relay.var('weight2')
         y = relay.nn.conv2d(x, weight1,
                             channels=32,
                             kernel_size=(3, 3),
                             padding=(1, 1))
         y = relay.nn.relu(y)
-        y1 = relay.nn.conv2d(y, weight2,
-                             channels=32,
-                             kernel_size=(3, 3),
-                             padding=(1, 1))
-        y1 = relay.nn.relu(y1)
-        y2 = relay.nn.batch_flatten(y)
-        ret = relay.Tuple([y1, y2])
-        y = relay.Function(free_vars(ret), ret)
+        # y1 = relay.nn.conv2d(y, weight2,
+        #                      channels=32,
+        #                      kernel_size=(3, 3),
+        #                      padding=(1, 1))
+        # y1 = relay.nn.relu(y1)
+        # y2 = relay.nn.batch_flatten(y)
+        # ret = relay.Tuple([y1, y2])
+        # y = relay.Function(free_vars(ret), ret)
+        y = relay.Function([x, weight1], y)
         return y
 
     @register_alter_op_layout("nn.conv2d", level=103)
@@ -197,7 +203,7 @@ def test_alter_layout_dual_path():
     b = expected()
     b = infer_type(b)
 
-    assert(alpha_equal(a, b))
+    assert_alpha_equal(b, a)
 
 def test_alter_layout_resnet():
     """Test alternating the layout of a residual block
@@ -257,7 +263,7 @@ def test_alter_layout_resnet():
     b = expected()
     b = infer_type(b)
 
-    assert(alpha_equal(a, b))
+    assert_alpha_equal(b, a)
 
 
 def test_alter_layout_broadcast_op():
@@ -307,7 +313,7 @@ def test_alter_layout_broadcast_op():
     b = expected()
     b = infer_type(b)
 
-    assert(alpha_equal(a, b))
+    assert_alpha_equal(b, a)
 
 def test_alter_layout_scalar():
     """Test alternating the layout of a conv2d.
@@ -354,7 +360,7 @@ def test_alter_layout_scalar():
     b = expected()
     b = infer_type(b)
 
-    assert(alpha_equal(a, b))
+    assert_alpha_equal(b, a)
 
 def test_alter_layout_concatenate():
     """ """
@@ -409,7 +415,7 @@ def test_alter_layout_concatenate():
     b = expected()
     b = infer_type(b)
 
-    assert(alpha_equal(a, b))
+    assert_alpha_equal(b, a)
 
 def test_alter_layout_dense():
     """ """
@@ -442,15 +448,51 @@ def test_alter_layout_dense():
     b = expected()
     b = infer_type(b)
 
-    assert(alpha_equal(a, b))
+    assert_alpha_equal(b, a)
+
+def test_alter_layout_stacked_op():
+    def before():
+        x = relay.var("x", shape=(1, 64, 56, 56))
+        w = relay.var("weight")
+        y = relay.nn.conv2d(x, w, channels=64, kernel_size=(3, 3), padding=(1, 1))
+        y = relay.Function(free_vars(y), y)
+        return y
+
+    @register_alter_op_layout("nn.conv2d", level=108)
+    def alter_conv2d(attrs, inputs, tinfos):
+        data, weight = inputs
+        new_attrs = dict(attrs)
+        new_attrs['data_layout'] = 'NCHW16c'
+        conv = relay.nn.conv2d(data, weight, **new_attrs)
+        return relay.nn.relu(conv)
+
+    def expected():
+        x = relay.var("x", shape=(1, 64, 56, 56))
+        w = relay.var("weight")
+        x = relay.layout_transform(x, "NCHW", "NCHW16c")
+        y = relay.nn.conv2d(x, w, channels=64, kernel_size=(3, 3),
+                            padding=(1, 1), data_layout="NCHW16c")
+        ret = relay.nn.relu(y)
+        return relay.Function(free_vars(ret), ret)
+
+    a = before()
+    a = infer_type(a)
+    a = alter_op_layout(a)
+    a = infer_type(a)
+
+    b = expected()
+    b = infer_type(b)
+
+    assert_alpha_equal(b, a)
 
 if __name__ == "__main__":
-    test_alter_op()
-    test_alter_return_none()
-    test_alter_layout()
+    # test_alter_op()
+    # test_alter_return_none()
+    # test_alter_layout()
     test_alter_layout_dual_path()
-    test_alter_layout_resnet()
-    test_alter_layout_broadcast_op()
-    test_alter_layout_scalar()
-    test_alter_layout_concatenate()
-    test_alter_layout_dense()
+    # test_alter_layout_resnet()
+    # test_alter_layout_broadcast_op()
+    # test_alter_layout_scalar()
+    # test_alter_layout_concatenate()
+    # test_alter_layout_dense()
+    # test_alter_layout_stacked_op()

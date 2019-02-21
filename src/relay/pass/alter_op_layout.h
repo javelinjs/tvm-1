@@ -68,6 +68,7 @@ inline Array<Array<Layout> > BinaryBroadcastLayout(const Attrs& attrs,
     layouts.assign(old_in_layouts.begin(), old_in_layouts.end());
   }
 
+  LOG(INFO) << "BinaryBroadcastLayout " << layouts[0] << " " << layouts[0].defined() << " " << layouts[1] << " " << layouts[1].defined();
   if (!layouts[0].defined() && !layouts[1].defined()) {
     // both undefined, infer fails
     return Array<Array<Layout> > {{Layout::Undef()}, {Layout::Undef()}};
@@ -76,7 +77,12 @@ inline Array<Array<Layout> > BinaryBroadcastLayout(const Attrs& attrs,
     int defined_idx = layouts[0].defined() ? 0 : 1;
     int undef_idx = 1 - defined_idx;
 
-    if (old_in_shapes[defined_idx].size() >= old_in_shapes[undef_idx].size()) {
+    LOG(INFO) << "old_shapes[" << defined_idx << "] = " << old_in_shapes[defined_idx];
+    LOG(INFO) << "old_shapes[" << undef_idx << "] = " << old_in_shapes[undef_idx];
+    if (old_in_shapes[undef_idx].size() == 0) {
+      // scalar
+      return Array<Array<Layout> > {layouts, {layouts[defined_idx]}};
+    } else if (old_in_shapes[defined_idx].size() >= old_in_shapes[undef_idx].size()) {
       layouts.Set(undef_idx,
                   layouts[defined_idx].Sublayout(
                       old_in_shapes[defined_idx].size() - old_in_shapes[undef_idx].size(),
