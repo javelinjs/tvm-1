@@ -117,20 +117,21 @@ RELAY_DEFINE_NODE_REF(LayoutAlternatedExpr, LayoutAlternatedExprNode, TempExpr);
 
 // Tuple<Expr> -> Tuple<T> or Expr -> T
 template<typename T>
-Expr ConvertKeepTuple(const Expr& e, std::function<T (const Expr&)> converter) {
+Expr ConvertKeepTuple(const Expr& e, std::function<T (const Expr&, size_t)> converter) {
   if (e->is_type<TupleNode>()) {
     Tuple t = Downcast<Tuple>(e);
     Array<Expr> new_fields;
-    for (Expr arg : t->fields) {
-      T new_arg = converter(arg);
+    for (size_t i = 0; i < t->fields.size(); ++i) {
+      T new_arg = converter(t->fields[i], i);
       new_fields.push_back(new_arg);
     }
     return TupleNode::make(new_fields);
   } else {
-    return converter(e);
+    return converter(e, 0);
   }
 }
 
+// TODO: combine following
 // Array<TupleNode<LayoutAlternatedExpr>> -> Array<T> or
 // Array<LayoutAlternatedExpr>            -> Array<T>
 template<typename T>
@@ -149,6 +150,23 @@ Array<T> FlattenArray(const Array<Expr>& array,
       const auto *inp = e.as<LayoutAlternatedExprNode>();
       CHECK(inp);
       results.push_back(converter(GetRef<LayoutAlternatedExpr>(inp)));
+    }
+  }
+  return results;
+}
+
+template<typename T>
+Array<T> FlattenArrayGeneral(const Array<Expr>& array,
+                             std::function<T (const Expr&)> converter) {
+  Array<T> results;
+  for (Expr e : array) {
+    if (e->is_type<TupleNode>()) {
+      Tuple t = Downcast<Tuple>(e);
+      for (Expr field : t->fields) {
+        results.push_back(converter(field));
+      }
+    } else {
+      results.push_back(converter(e));
     }
   }
   return results;
@@ -179,9 +197,14 @@ std::tuple<Array<Layout>, Array<Layout>, bool> CallInfer(
 
 class ReplaceArgsMutator : private ExprMutator {
  public:
-  ReplaceArgsMutator(Array<Expr> real_args, Array<Expr> fake_args)
-    : real_args_(std::move(real_args)), fake_args_(std::move(fake_args)) {
-    CHECK_EQ(real_args.size(), fake_args.size());
+  ReplaceArgsMutator(const Array<Expr>& real_args, const Array<Expr>& fake_args) {
+    real_args_ = FlattenArrayGeneral<Expr>(real_args, [](const Expr& e) -> Expr {
+      return e;
+    });
+    fake_args_ = FlattenArrayGeneral<Expr>(fake_args, [](const Expr& e) -> Expr {
+      return e;
+    });
+    CHECK_EQ(real_args_.size(), fake_args_.size());
   }
 
   Expr Visit(const Expr& expr) { return ExprMutator::Mutate(expr); }
@@ -205,18 +228,27 @@ class FixLayoutMutator : private ExprMutator {
  public:
   FixLayoutMutator(TransformMemorizer& memorizer,
                    const Expr& input,
-                   Array<Expr> args,
+                   const Array<Expr>& args,
                    const Array<Expr>& args_replacement,
-                   Array<Layout> new_in_layouts,
-                   Array<Layout> old_in_layouts,
-                   Array<Layout> old_out_layouts)
-  : memorizer_(memorizer),
-    input_(input),
-    args_(std::move(args)),
-    args_replacement_(args_replacement),
-    new_in_layouts_(std::move(new_in_layouts)),
-    old_in_layouts_(std::move(old_in_layouts)),
-    old_out_layouts_(std::move(old_out_layouts)) {}
+                   const Array<Layout>& new_in_layouts,
+                   const Array<Layout>& old_in_layouts,
+                   const Array<Layout>& old_out_layouts)
+    : memorizer_(memorizer),
+      input_(input),
+      args_(args),
+      args_replacement_(args_replacement),
+      new_in_layouts_(new_in_layouts),
+      old_in_layouts_(old_in_layouts),
+      old_out_layouts_(old_out_layouts) {
+    args_flatten_ = FlattenArrayGeneral<Var>(args, [](const Expr& e) -> Var {
+      return GetRef<Var>(e.as<VarNode>());
+    });
+    LOG(INFO) << "args_flatten_ = " << args_flatten_;
+    args_replacement_flatten_ = FlattenArrayGeneral<Expr>(args_replacement, [](const Expr& e) -> Expr {
+      return e;
+    });
+    LOG(INFO) << "args_flatten_ repl = " << args_replacement_flatten_;
+  }
 
   Expr Visit() { return ExprMutator::Mutate(input_); }
 
@@ -231,8 +263,7 @@ class FixLayoutMutator : private ExprMutator {
     for (const auto& arg : call->args) {
       Expr mutated_arg = ExprMutator::Mutate(arg);
 
-      LOG(INFO) << "haha1";
-      new_args.push_back(ConvertKeepTuple<Expr>(mutated_arg, [](const Expr& single_arg) {
+      new_args.push_back(ConvertKeepTuple<Expr>(mutated_arg, [](const Expr& single_arg, size_t idx) {
         auto inp = single_arg.as<LayoutAlternatedExprNode>();
         CHECK(inp);
         return inp->value;
@@ -240,13 +271,11 @@ class FixLayoutMutator : private ExprMutator {
       new_alternated_expr_args.push_back(mutated_arg);
     }
 
-    LOG(INFO) << "haha2";
     Array<Layout> old_in_layouts = FlattenArray<Layout>(
       new_alternated_expr_args, [](const LayoutAlternatedExpr& e) -> Layout {
       return e->old_layout;
     });
 
-    LOG(INFO) << "haha3";
     Array<Layout> new_in_layouts = FlattenArray<Layout>(
       new_alternated_expr_args, [](const LayoutAlternatedExpr& e) -> Layout {
       return e->new_layout;
@@ -271,9 +300,8 @@ class FixLayoutMutator : private ExprMutator {
     LOG(INFO) << "(3) generate layout transform";
     Array<Expr> transformed_args;
     size_t idx_flatten = 0;
-    for (size_t i = 0; i < new_args.size(); ++i) {
-//      LOG(INFO) << "arg[" << i << "]: new_in_layout=" << new_in_layouts[i] << " required_in_layout=" << required_in_layouts[i];
-      Expr transformed_arg = ConvertKeepTuple<Expr>(new_args[i], [&](const Expr& arg) {
+    for (const auto& new_arg : new_args) {
+      Expr transformed_arg = ConvertKeepTuple<Expr>(new_arg, [&](const Expr& arg, size_t idx) {
         Expr res = memorizer_.Transform(arg, new_in_layouts[idx_flatten],
                                         required_in_layouts[idx_flatten]);
         idx_flatten++;
@@ -295,7 +323,6 @@ class FixLayoutMutator : private ExprMutator {
 
     // root node, do fake_args replacement
     if (call == input_.get()) {
-      LOG(INFO) << "root node, do fake_args replacement";
       // since arg_replacer does not change the root node's type,
       // we can simply backup the type and restore later.
       auto checked_type = new_call->checked_type_;
@@ -312,7 +339,6 @@ class FixLayoutMutator : private ExprMutator {
         rnode->new_layout = out_layouts[i];
         rnode->new_type = new_call->checked_type();
         if (call == input_.get()) {
-          LOG(INFO) << "call == input_.get())";
           CHECK_EQ(num_output, old_out_layouts_.size());
           rnode->old_layout = old_out_layouts_[i];
           rnode->old_type = input_->checked_type();
@@ -331,7 +357,6 @@ class FixLayoutMutator : private ExprMutator {
       rnode->new_layout = out_layouts[0];
       rnode->new_type = new_call->checked_type();
       if (call == input_.get()) {
-        LOG(INFO) << "call == input_.get())";
         CHECK_EQ(1, old_out_layouts_.size());
         rnode->old_layout = old_out_layouts_[0];
         rnode->old_type = input_->checked_type();
@@ -345,14 +370,14 @@ class FixLayoutMutator : private ExprMutator {
   }
 
   Expr VisitExpr_(const VarNode* op) final {
-    for (size_t i = 0; i < args_.size(); ++i) {
-      if (op->name_hint() == args_[i].as<VarNode>()->name_hint()) {
+    for (size_t i = 0; i < args_flatten_.size(); ++i) {
+      if (op->name_hint() == args_flatten_[i]->name_hint()) {
         auto ret = make_node<LayoutAlternatedExprNode>();
         ret->value = InferType(GetRef<Expr>(op), Module());
         ret->old_layout = old_in_layouts_[i];
         ret->new_layout = new_in_layouts_[i];
-        ret->old_type = args_replacement_[i]->checked_type();
-        ret->new_type = args_replacement_[i]->checked_type();
+        ret->old_type = args_replacement_flatten_[i]->checked_type();
+        ret->new_type = args_replacement_flatten_[i]->checked_type();
         ret->memorizer = memorizer_;
         return Expr(ret);
       }
@@ -366,13 +391,13 @@ class FixLayoutMutator : private ExprMutator {
     ret->value = InferType(GetRef<Expr>(op), Module());
     ret->old_layout = Layout::Undef();
     ret->new_layout = Layout::Undef();
+    // TODO: type not set, consider to use shape instead.
     ret->memorizer = memorizer_;
     return Expr(ret);
   }
 
   Expr VisitExpr_(const GlobalVarNode* op) final { LOG(FATAL) << "not supported " << GetRef<Expr>(op); }
   Expr VisitExpr_(const OpNode* op) final { LOG(FATAL) << "not supported " << GetRef<Expr>(op); }
-  Expr VisitExpr_(const TupleNode* op) final { LOG(FATAL) << "not supported " << GetRef<Expr>(op); }
   Expr VisitExpr_(const FunctionNode* op) final { LOG(FATAL) << "not supported " << GetRef<Expr>(op); }
   Expr VisitExpr_(const LetNode* op) final { LOG(FATAL) << "not supported " << GetRef<Expr>(op); }
   Expr VisitExpr_(const IfNode* op) final { LOG(FATAL) << "not supported " << GetRef<Expr>(op); }
@@ -386,6 +411,10 @@ class FixLayoutMutator : private ExprMutator {
   Expr input_;
   Array<Expr> args_;
   Array<Expr> args_replacement_;
+
+  Array<Var> args_flatten_;
+  Array<Expr> args_replacement_flatten_;
+
   Array<Layout> new_in_layouts_;
   Array<Layout> old_in_layouts_;
   Array<Layout> old_out_layouts_;
@@ -409,9 +438,9 @@ Expr CallAlter(const Call& ref_call,
   Array<Expr> fake_args;
 
   for (size_t i = 0; i < new_args.size(); ++i) {
-    std::stringstream var_name;
-    var_name << op->name << "." << ref_call.hash() << "#" << i;
-    Expr fake_arg = ConvertKeepTuple<Var>(new_args[i], [&var_name](const Expr& arg) {
+    Expr fake_arg = ConvertKeepTuple<Var>(new_args[i], [&](const Expr& arg, size_t idx) {
+      std::stringstream var_name;
+      var_name << op->name << "." << ref_call.hash() << "#" << i << "#" << idx;
       const auto* inp = arg.as<LayoutAlternatedExprNode>();
       CHECK(inp);
       auto new_type = inp->new_type.as<TensorTypeNode>();
@@ -421,7 +450,7 @@ Expr CallAlter(const Call& ref_call,
     });
     fake_args.push_back(fake_arg);
 
-    Expr real_arg = ConvertKeepTuple<Expr>(new_args[i], [](const Expr& arg) {
+    Expr real_arg = ConvertKeepTuple<Expr>(new_args[i], [](const Expr& arg, size_t idx) {
       const auto* inp = arg.as<LayoutAlternatedExprNode>();
       CHECK(inp);
       return inp->value;
@@ -456,8 +485,6 @@ Expr CallAlter(const Call& ref_call,
   new_e->checked_type_ = ref_call->checked_type();
 
   // fix layout
-  // TODO: fake_args can contain tuple
-  LOG(INFO) << "old_out_layouts = " << old_out_layouts;
   FixLayoutMutator layout_fixer(memorizer, new_e, fake_args, real_args,
                                 new_in_layouts, old_in_layouts, old_out_layouts);
 
@@ -495,7 +522,7 @@ Expr AlterOpLayoutRewrite(const Call &ref_call,
   Array<Expr> inputs; // Array<LayoutAlternatedExpr> effectively
   for (auto new_arg : new_args) {
     Expr input = ConvertKeepTuple<LayoutAlternatedExpr>(
-      new_arg, [&memorizer](const Expr& field) {
+      new_arg, [&memorizer](const Expr& field, size_t idx) {
       return GetLayoutAlternatedExpr(field, memorizer);
     });
     inputs.push_back(input);
