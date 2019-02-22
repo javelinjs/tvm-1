@@ -524,6 +524,6 @@ if __name__ == "__main__":
     # test_alter_layout_resnet()
     # test_alter_layout_broadcast_op()
     # test_alter_layout_scalar()
-    test_alter_layout_concatenate()
+    # test_alter_layout_concatenate()
     # test_alter_layout_dense()
-    # test_alter_layout_relu_after_conv()
+    test_alter_layout_relu_after_conv()
