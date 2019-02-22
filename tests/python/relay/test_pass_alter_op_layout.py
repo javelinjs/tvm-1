@@ -479,7 +479,7 @@ def test_alter_layout_dense():
 
     assert_alpha_equal(b, a)
 
-def test_alter_layout_stacked_op():
+def test_alter_layout_relu_after_conv():
     def before():
         x = relay.var("x", shape=(1, 64, 56, 56))
         w = relay.var("weight")
@@ -502,6 +502,7 @@ def test_alter_layout_stacked_op():
         y = relay.nn.conv2d(x, w, channels=64, kernel_size=(3, 3),
                             padding=(1, 1), data_layout="NCHW16c")
         ret = relay.nn.relu(y)
+        ret = relay.layout_transform(ret, "NCHW16c", "NCHW")
         return relay.Function(free_vars(ret), ret)
 
     a = before()
@@ -515,14 +516,14 @@ def test_alter_layout_stacked_op():
     assert_alpha_equal(b, a)
 
 if __name__ == "__main__":
-    test_alter_multiply()
-    test_alter_op()
-    test_alter_return_none()
-    test_alter_layout()
-    test_alter_layout_dual_path()
+    # test_alter_multiply()
+    # test_alter_op()
+    # test_alter_return_none()
+    # test_alter_layout()
+    # test_alter_layout_dual_path()
     # test_alter_layout_resnet()
     # test_alter_layout_broadcast_op()
     # test_alter_layout_scalar()
-    # test_alter_layout_concatenate()
+    test_alter_layout_concatenate()
     # test_alter_layout_dense()
-    # test_alter_layout_stacked_op()
+    # test_alter_layout_relu_after_conv()

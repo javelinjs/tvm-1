@@ -196,8 +196,9 @@ class FixLayoutMutator : private ExprMutator {
     Array<Layout> new_in_layouts;
     Array<Layout> old_in_layouts;
     Array<Array<IndexExpr> > old_in_shapes;
-    for (const auto &arg : call->args) {
+    for (const auto& arg : call->args) {
       Expr mutated_arg = ExprMutator::Mutate(arg);
+      // TODO: arg is tuple
       const LayoutAlternatedExprNode* inp = mutated_arg.as<LayoutAlternatedExprNode>();
       CHECK(inp);
 
@@ -254,7 +255,6 @@ class FixLayoutMutator : private ExprMutator {
         ret->old_layout = old_in_layouts_[i];
         ret->new_layout = new_in_layouts_[i];
         ret->memorizer = memorizer_;
-        // auto ttype = op->type_annotation.as<TensorTypeNode>();
         return Expr(ret);
       }
     }
@@ -287,10 +287,7 @@ class FixLayoutMutator : private ExprMutator {
   Array<Expr> args_;
   Array<Layout> new_in_layouts_;
   Array<Layout> old_in_layouts_;
-  // new_layout, old_layout, old_shape
-
   TransformMemorizer memorizer_;
-//  Array<Array<IndexExpr> > shapes_;
 };
 
 // Call registered FTVMAlterOpLayout of an op
@@ -309,20 +306,24 @@ std::tuple<Call, Array<Layout>, bool> CallAlter(const Call& ref_call,
   Array<Expr> fake_args;
 
   tvm::Array<tvm::Tensor> tinfos;
+  LOG(INFO) << "CallAlter1" << new_args.size();
   for (size_t i = 0; i < new_args.size(); ++i) {
+    // TODO: arg is tuple
     auto arg = new_args[i];
+    LOG(INFO) << "arg[" << i << "] = " << arg;
     auto old_type = arg->old_type.as<TensorTypeNode>();
     auto new_type = arg->new_type.as<TensorTypeNode>();
     CHECK(old_type && new_type);
     tinfos.push_back(tvm::placeholder(old_type->shape, old_type->dtype));
     std::stringstream var_name;
     // TODO: flatten tuple node?
-    var_name << op->name << "." << op->arguments[i]->name << "." << ref_call.hash() << "#" << i;
+    var_name << op->name << "." << ref_call.hash() << "#" << i;
     fake_args.push_back(VarNode::make(var_name.str(),
                                       TensorTypeNode::make(new_type->shape,
                                                            new_type->dtype)));
     real_args.push_back(new_args[i]->value);
   }
+  LOG(INFO) << "CallAlter2";
 
   if (falter_layout.count(op)) {
     CHECK_EQ(op->arguments.size(), ref_call->args.size());
@@ -337,6 +338,7 @@ std::tuple<Call, Array<Layout>, bool> CallAlter(const Call& ref_call,
     new_e = CallNode::make(ref_call->op, fake_args,
                            ref_call->attrs);
   }
+  LOG(INFO) << "CallAlter3";
 
   // fix layout
   Array<Layout> out_layout;
@@ -345,15 +347,18 @@ std::tuple<Call, Array<Layout>, bool> CallAlter(const Call& ref_call,
   // TODO: what if it is a tuple node?
   out_layout.push_back(new_e.as<LayoutAlternatedExprNode>()->new_layout);
   new_e = new_e.as<LayoutAlternatedExprNode>()->value;
+  LOG(INFO) << "CallAlter4";
 
   CHECK(new_e->checked_type_.defined());
   auto ttype = new_e->checked_type_;
+  LOG(INFO) << "CallAlter5";
 
   ReplaceArgsMutator args_replacer(real_args, fake_args);
   new_e = args_replacer.Visit(new_e);
   // since arg_replacer does not change the root node's type,
   // we can simply restore the backup type.
   new_e->checked_type_ = ttype;
+  LOG(INFO) << "CallAlter6";
 
   const CallNode *new_call = new_e.as<CallNode>();
   CHECK(new_call) << "Can only replace the original operator with another call node";
@@ -375,6 +380,7 @@ LayoutAlternatedExpr GetLayoutAlternatedExpr(Expr arg, const TransformMemorizer&
 Expr AlterOpLayoutRewrite(const Call &ref_call,
                           const Array<Expr> &new_args,
                           const NodeRef& ctx) {
+  LOG(INFO) << "hello1 " << ref_call;
   std::vector<LayoutAlternatedExpr> inputs;
   Array<Array<IndexExpr> > input_shapes;
 
@@ -388,19 +394,21 @@ Expr AlterOpLayoutRewrite(const Call &ref_call,
   // We always expect LayoutAlternatedExpr.
   // This is used to convert the normal Expr to LayoutAlternatedExpr.
   for (auto new_arg : new_args) {
-    // NOTE: do not support nested tuple
     if (new_arg->is_type<TupleNode>()) {
+      LOG(INFO) << "IS TUPLE NODE";
       Tuple tuple_new_arg = Downcast<Tuple>(new_arg);
       for (auto x : tuple_new_arg->fields) {
+        CHECK(!x->is_type<TupleNode>()) << "AlterOpLayout pass does not support nested tuple";
         inputs.push_back(GetLayoutAlternatedExpr(x, memorizer));
       }
     } else {
       inputs.push_back(GetLayoutAlternatedExpr(new_arg, memorizer));
     }
   }
+  LOG(INFO) << "hello2 " << ref_call;
 
   // old_in, new_in = state[inputs]
-  Array<Layout> old_in, old_out, new_in, new_out, new_in2;
+  Array<Layout> old_in, old_out, new_in, new_out;
   for (auto inp : inputs) {
     old_in.push_back(inp->old_layout);
     new_in.push_back(inp->new_layout);
@@ -416,6 +424,7 @@ Expr AlterOpLayoutRewrite(const Call &ref_call,
       input_shapes.push_back(arg->type_as<TensorTypeNode>()->shape);
     }
   }
+  LOG(INFO) << "hello3 " << ref_call;
 
   // old_in, old_out = op.infer(old_in)
   bool success = false;
@@ -423,6 +432,7 @@ Expr AlterOpLayoutRewrite(const Call &ref_call,
   std::tie(inferred_old_layout, old_out, success) = CallInfer(ref_call, num_output,
                                                               Array<Layout>(nullptr),
                                                               old_in, input_shapes);
+  LOG(INFO) << "hello4 " << ref_call;
   if (success) {
     CHECK_EQ(old_in.size(), inferred_old_layout.size());
     for (size_t i = 0; i < old_in.size(); ++i) {
@@ -437,6 +447,7 @@ Expr AlterOpLayoutRewrite(const Call &ref_call,
     }
   }
   CHECK_EQ(old_in.size(), new_in.size());
+  LOG(INFO) << "hello5 " << ref_call;
 
   // if new_in == 'undef':  new_in = old_in
   for (size_t i = 0; i < new_in.size(); ++i) {
@@ -450,6 +461,7 @@ Expr AlterOpLayoutRewrite(const Call &ref_call,
   bool altered;
   std::tie(new_call, new_out, altered) = CallAlter(ref_call, inputs, memorizer, new_in, old_in);
   CHECK_EQ(new_out.size(), old_out.size());
+  LOG(INFO) << "hello6 " << ref_call;
 
   // new_in2, new_out = op.infer(new_in)
   Expr ret = new_call;
