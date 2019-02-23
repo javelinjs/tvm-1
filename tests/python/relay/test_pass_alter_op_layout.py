@@ -8,36 +8,6 @@ def assert_alpha_equal(expected, actual):
     assert alpha_equal(expected, actual), "\nExpected:\n" + str(expected) \
                                           + "\nActual:\n" + str(actual)
 
-def test_alter_multiply():
-    def before():
-        x = relay.var("x", shape=(1, 64, 56, 56))
-        y = relay.const(2.0, "float32")
-        ret = relay.multiply(x, y)
-        ret = relay.Function([x], ret)
-        return ret
-
-    @register_alter_op_layout("multiply", level=100)
-    def alter_conv2d(attrs, inputs, tinfos):
-        x, y = inputs
-        return relay.multiply(x, relay.const(3.0, "float32"))
-
-    def expected():
-        x = relay.var("x", shape=(1, 64, 56, 56))
-        y = relay.const(3.0, "float32")
-        ret = relay.multiply(x, y)
-        ret = relay.Function([x], ret)
-        return ret
-
-    a = before()
-    a = infer_type(a)
-    a = alter_op_layout(a)
-
-    b = expected()
-    b = infer_type(b)
-
-    assert_alpha_equal(b, a)
-
-
 def test_alter_op():
     """Test directly replacing an operator with a new one"""
     def before():
@@ -515,15 +485,79 @@ def test_alter_layout_relu_after_conv():
 
     assert_alpha_equal(b, a)
 
+def test_alter_multiply_const():
+    def before():
+        x = relay.var("x", shape=(1, 64, 56, 56))
+        y = relay.const(2.0, "float32")
+        ret = relay.multiply(x, y)
+        ret = relay.Function([x], ret)
+        return ret
+
+    @register_alter_op_layout("multiply", level=109)
+    def alter_multiply(attrs, inputs, tinfos):
+        x, y = inputs
+        return relay.multiply(x, relay.const(3.0, "float32"))
+
+    def expected():
+        x = relay.var("x", shape=(1, 64, 56, 56))
+        y = relay.const(3.0, "float32")
+        ret = relay.multiply(x, y)
+        ret = relay.Function([x], ret)
+        return ret
+
+    a = before()
+    a = infer_type(a)
+    a = alter_op_layout(a)
+
+    b = expected()
+    b = infer_type(b)
+
+    assert_alpha_equal(b, a)
+
+def test_alter_softmax():
+    def before():
+        x = relay.var("x", shape=(1, 1000))
+        ret = relay.nn.softmax(x, axis=1)
+        ret = relay.Function([x], ret)
+        return ret
+
+    @register_alter_op_layout("nn.softmax", level=110)
+    def alter_softmax(attrs, inputs, tinfos):
+        # which creates multiple branches for one single node
+        x = inputs[0]
+        max_value = relay.max(data=x, axis=1, keepdims=True)
+        data = x - max_value
+        exp_data = relay.exp(data)
+        exp_sum = relay.sum(exp_data, axis=1, keepdims=True)
+        return exp_data / exp_sum
+
+    def expected():
+        x = relay.var("x", shape=(1, 1000))
+        max_value = relay.max(data=x, axis=1, keepdims=True)
+        data = x - max_value
+        exp_data = relay.exp(data)
+        exp_sum = relay.sum(exp_data, axis=1, keepdims=True)
+        return exp_data / exp_sum
+
+    a = before()
+    a = infer_type(a)
+    a = alter_op_layout(a)
+
+    b = expected()
+    b = infer_type(b)
+
+    assert_alpha_equal(b, a)
+
 if __name__ == "__main__":
-    test_alter_multiply()
     test_alter_op()
     test_alter_return_none()
     test_alter_layout()
     test_alter_layout_dual_path()
     # test_alter_layout_resnet()
-    # test_alter_layout_broadcast_op()
+    test_alter_layout_broadcast_op()
     test_alter_layout_scalar()
     test_alter_layout_concatenate()
     test_alter_layout_dense()
     test_alter_layout_relu_after_conv()
+    test_alter_multiply_const()
+    test_alter_softmax()

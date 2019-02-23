@@ -22,7 +22,7 @@ namespace relay {
 namespace alter_op_layout {
 
 // Make a transform CallNode
-Expr TransformLayout(Expr raw, Layout src_layout, Layout dst_layout) {
+Expr TransformLayout(Expr raw, const Layout &src_layout, const Layout& dst_layout) {
   if (src_layout.Equals(dst_layout)) { return raw; }
   CHECK(src_layout.defined() && dst_layout.defined())
     << "Cannot insert layout transform because there are undefined layouts. src="
@@ -117,56 +117,34 @@ RELAY_DEFINE_NODE_REF(LayoutAlternatedExpr, LayoutAlternatedExprNode, TempExpr);
 
 // Tuple<Expr> -> Tuple<T> or Expr -> T
 template<typename T>
-Expr ConvertKeepTuple(const Expr& e, std::function<T (const Expr&, size_t)> converter) {
+Expr MapTuple(const Expr &e, std::function<T(const Expr &, size_t)> mapper) {
   if (e->is_type<TupleNode>()) {
     Tuple t = Downcast<Tuple>(e);
     Array<Expr> new_fields;
     for (size_t i = 0; i < t->fields.size(); ++i) {
-      T new_arg = converter(t->fields[i], i);
+      T new_arg = mapper(t->fields[i], i);
       new_fields.push_back(new_arg);
     }
     return TupleNode::make(new_fields);
   } else {
-    return converter(e, 0);
+    return mapper(e, 0);
   }
 }
 
-// TODO: combine following
-// Array<TupleNode<LayoutAlternatedExpr>> -> Array<T> or
-// Array<LayoutAlternatedExpr>            -> Array<T>
+// Array<TupleNode<Expr>> -> Array<T> or
+// Array<Expr>            -> Array<T>
 template<typename T>
-Array<T> FlattenArray(const Array<Expr>& array,
-                      std::function<T (const LayoutAlternatedExpr&)> converter) {
+Array<T> FlatMapTuple(const Array<Expr>& array,
+                      std::function<T(const Expr&)> mapper) {
   Array<T> results;
   for (Expr e : array) {
     if (e->is_type<TupleNode>()) {
       Tuple t = Downcast<Tuple>(e);
       for (Expr field : t->fields) {
-        const auto *inp = field.as<LayoutAlternatedExprNode>();
-        CHECK(inp);
-        results.push_back(converter(GetRef<LayoutAlternatedExpr>(inp)));
+        results.push_back(mapper(field));
       }
     } else {
-      const auto *inp = e.as<LayoutAlternatedExprNode>();
-      CHECK(inp);
-      results.push_back(converter(GetRef<LayoutAlternatedExpr>(inp)));
-    }
-  }
-  return results;
-}
-
-template<typename T>
-Array<T> FlattenArrayGeneral(const Array<Expr>& array,
-                             std::function<T (const Expr&)> converter) {
-  Array<T> results;
-  for (Expr e : array) {
-    if (e->is_type<TupleNode>()) {
-      Tuple t = Downcast<Tuple>(e);
-      for (Expr field : t->fields) {
-        results.push_back(converter(field));
-      }
-    } else {
-      results.push_back(converter(e));
+      results.push_back(mapper(e));
     }
   }
   return results;
@@ -197,15 +175,8 @@ std::tuple<Array<Layout>, Array<Layout>, bool> CallInfer(
 
 class ReplaceArgsMutator : private ExprMutator {
  public:
-  ReplaceArgsMutator(const Array<Expr>& real_args, const Array<Expr>& fake_args) {
-    real_args_ = FlattenArrayGeneral<Expr>(real_args, [](const Expr& e) -> Expr {
-      return e;
-    });
-    fake_args_ = FlattenArrayGeneral<Expr>(fake_args, [](const Expr& e) -> Expr {
-      return e;
-    });
-    CHECK_EQ(real_args_.size(), fake_args_.size());
-  }
+  ReplaceArgsMutator(const Array<Expr>& real_args, const Array<Expr>& fake_args)
+    : real_args_(real_args), fake_args_(fake_args) {}
 
   Expr Visit(const Expr& expr) { return ExprMutator::Mutate(expr); }
 
@@ -240,14 +211,12 @@ class FixLayoutMutator : private ExprMutator {
       new_in_layouts_(new_in_layouts),
       old_in_layouts_(old_in_layouts),
       old_out_layouts_(old_out_layouts) {
-    args_flatten_ = FlattenArrayGeneral<Var>(args, [](const Expr& e) -> Var {
-      return GetRef<Var>(e.as<VarNode>());
-    });
-    LOG(INFO) << "args_flatten_ = " << args_flatten_;
-    args_replacement_flatten_ = FlattenArrayGeneral<Expr>(args_replacement, [](const Expr& e) -> Expr {
+    args_flatten_ = FlatMapTuple<Expr>(args, [](const Expr &e) -> Expr {
       return e;
     });
-    LOG(INFO) << "args_flatten_ repl = " << args_replacement_flatten_;
+    args_replacement_flatten_ = FlatMapTuple<Expr>(args_replacement, [](const Expr &e) -> Expr {
+      return e;
+    });
   }
 
   Expr Visit() { return ExprMutator::Mutate(input_); }
@@ -263,7 +232,7 @@ class FixLayoutMutator : private ExprMutator {
     for (const auto& arg : call->args) {
       Expr mutated_arg = ExprMutator::Mutate(arg);
 
-      new_args.push_back(ConvertKeepTuple<Expr>(mutated_arg, [](const Expr& single_arg, size_t idx) {
+      new_args.push_back(MapTuple<Expr>(mutated_arg, [](const Expr &single_arg, size_t idx) {
         auto inp = single_arg.as<LayoutAlternatedExprNode>();
         CHECK(inp);
         return inp->value;
@@ -271,20 +240,26 @@ class FixLayoutMutator : private ExprMutator {
       new_alternated_expr_args.push_back(mutated_arg);
     }
 
-    Array<Layout> old_in_layouts = FlattenArray<Layout>(
-      new_alternated_expr_args, [](const LayoutAlternatedExpr& e) -> Layout {
-      return e->old_layout;
+    Array<Layout> old_in_layouts = FlatMapTuple<Layout>(
+    new_alternated_expr_args, [](const Expr &e) -> Layout {
+      const auto *inp = e.as<LayoutAlternatedExprNode>();
+      CHECK(inp);
+      return inp->old_layout;
     });
 
-    Array<Layout> new_in_layouts = FlattenArray<Layout>(
-      new_alternated_expr_args, [](const LayoutAlternatedExpr& e) -> Layout {
-      return e->new_layout;
+    Array<Layout> new_in_layouts = FlatMapTuple<Layout>(
+    new_alternated_expr_args, [](const Expr &e) -> Layout {
+      const auto *inp = e.as<LayoutAlternatedExprNode>();
+      CHECK(inp);
+      return inp->new_layout;
     });
 
-    Array<Array<IndexExpr> > old_in_shapes = FlattenArray<Array<IndexExpr> >(
-      new_alternated_expr_args, [](const LayoutAlternatedExpr& e) -> Array<IndexExpr> {
-      return e->old_type.defined() ?
-             e->old_type.as<TensorTypeNode>()->shape :
+    Array<Array<IndexExpr> > old_in_shapes = FlatMapTuple<Array<IndexExpr> >(
+    new_alternated_expr_args, [](const Expr &e) -> Array<IndexExpr> {
+      const auto *inp = e.as<LayoutAlternatedExprNode>();
+      CHECK(inp);
+      return inp->old_type.defined() ?
+             inp->old_type.as<TensorTypeNode>()->shape :
              Array<IndexExpr>(nullptr);
     });
 
@@ -296,12 +271,18 @@ class FixLayoutMutator : private ExprMutator {
 
     CHECK_EQ(new_in_layouts.size(), required_in_layouts.size())
       << "The number of input nodes should keep the same during alter_op_layout";
+    // restore undefined new_in_layout if possible
+    for (size_t i = 0; i < new_in_layouts.size(); ++i) {
+      if (!new_in_layouts[i].defined()) {
+        new_in_layouts.Set(i, required_in_layouts[i]);
+      }
+    }
 
     LOG(INFO) << "(3) generate layout transform";
     Array<Expr> transformed_args;
     size_t idx_flatten = 0;
     for (const auto& new_arg : new_args) {
-      Expr transformed_arg = ConvertKeepTuple<Expr>(new_arg, [&](const Expr& arg, size_t idx) {
+      Expr transformed_arg = MapTuple<Expr>(new_arg, [&](const Expr &arg, size_t idx) {
         Expr res = memorizer_.Transform(arg, new_in_layouts[idx_flatten],
                                         required_in_layouts[idx_flatten]);
         idx_flatten++;
@@ -326,7 +307,7 @@ class FixLayoutMutator : private ExprMutator {
       // since arg_replacer does not change the root node's type,
       // we can simply backup the type and restore later.
       auto checked_type = new_call->checked_type_;
-      ReplaceArgsMutator args_replacer(args_replacement_, args_);
+      ReplaceArgsMutator args_replacer(args_replacement_flatten_, args_flatten_);
       new_call = args_replacer.Visit(new_call);
       new_call->checked_type_ = checked_type;
     }
@@ -371,7 +352,7 @@ class FixLayoutMutator : private ExprMutator {
 
   Expr VisitExpr_(const VarNode* op) final {
     for (size_t i = 0; i < args_flatten_.size(); ++i) {
-      if (op->name_hint() == args_flatten_[i]->name_hint()) {
+      if (op->name_hint() == args_flatten_[i].as<VarNode>()->name_hint()) {
         auto ret = make_node<LayoutAlternatedExprNode>();
         ret->value = InferType(GetRef<Expr>(op), Module());
         ret->old_layout = old_in_layouts_[i];
@@ -396,29 +377,63 @@ class FixLayoutMutator : private ExprMutator {
     return Expr(ret);
   }
 
-  Expr VisitExpr_(const GlobalVarNode* op) final { LOG(FATAL) << "not supported " << GetRef<Expr>(op); }
-  Expr VisitExpr_(const OpNode* op) final { LOG(FATAL) << "not supported " << GetRef<Expr>(op); }
-  Expr VisitExpr_(const FunctionNode* op) final { LOG(FATAL) << "not supported " << GetRef<Expr>(op); }
-  Expr VisitExpr_(const LetNode* op) final { LOG(FATAL) << "not supported " << GetRef<Expr>(op); }
-  Expr VisitExpr_(const IfNode* op) final { LOG(FATAL) << "not supported " << GetRef<Expr>(op); }
-  Expr VisitExpr_(const TupleGetItemNode* op) final { LOG(FATAL) << "not supported " << GetRef<Expr>(op); }
-  Expr VisitExpr_(const RefCreateNode* op) final { LOG(FATAL) << "not supported " << GetRef<Expr>(op); }
-  Expr VisitExpr_(const RefReadNode* op) final { LOG(FATAL) << "not supported " << GetRef<Expr>(op); }
-  Expr VisitExpr_(const RefWriteNode* op) final { LOG(FATAL) << "not supported " << GetRef<Expr>(op); }
-  Expr VisitExpr_(const ConstructorNode* op) final { LOG(FATAL) << "not supported " << GetRef<Expr>(op); }
-  Expr VisitExpr_(const MatchNode* op) final { LOG(FATAL) << "not supported " << GetRef<Expr>(op); }
+  // TODO
+  Expr VisitExpr_(const GlobalVarNode* op) final {
+    LOG(FATAL) << "AlterLayout does not support " << GetRef<Expr>(op);
+    return Expr(nullptr);
+  }
+  Expr VisitExpr_(const OpNode* op) final {
+    LOG(FATAL) << "not supported " << GetRef<Expr>(op);
+    return Expr(nullptr);
+  }
+  Expr VisitExpr_(const FunctionNode* op) final {
+    LOG(FATAL) << "not supported " << GetRef<Expr>(op);
+    return Expr(nullptr);
+  }
+  Expr VisitExpr_(const LetNode* op) final {
+    LOG(FATAL) << "not supported " << GetRef<Expr>(op);
+    return Expr(nullptr);
+  }
+  Expr VisitExpr_(const IfNode* op) final {
+    LOG(FATAL) << "not supported " << GetRef<Expr>(op);
+    return Expr(nullptr);
+  }
+  Expr VisitExpr_(const TupleGetItemNode* op) final {
+    LOG(FATAL) << "not supported " << GetRef<Expr>(op);
+    return Expr(nullptr);
+  }
+  Expr VisitExpr_(const RefCreateNode* op) final {
+    LOG(FATAL) << "not supported " << GetRef<Expr>(op);
+    return Expr(nullptr);
+  }
+  Expr VisitExpr_(const RefReadNode* op) final {
+    LOG(FATAL) << "not supported " << GetRef<Expr>(op);
+    return Expr(nullptr);
+  }
+  Expr VisitExpr_(const RefWriteNode* op) final {
+    LOG(FATAL) << "not supported " << GetRef<Expr>(op);
+    return Expr(nullptr);
+  }
+  Expr VisitExpr_(const ConstructorNode* op) final {
+    LOG(FATAL) << "not supported " << GetRef<Expr>(op);
+    return Expr(nullptr);
+  }
+  Expr VisitExpr_(const MatchNode* op) final {
+    LOG(FATAL) << "not supported " << GetRef<Expr>(op);
+    return Expr(nullptr);
+  }
 
+  TransformMemorizer memorizer_;
   Expr input_;
   Array<Expr> args_;
   Array<Expr> args_replacement_;
 
-  Array<Var> args_flatten_;
+  Array<Expr> args_flatten_;
   Array<Expr> args_replacement_flatten_;
 
   Array<Layout> new_in_layouts_;
   Array<Layout> old_in_layouts_;
   Array<Layout> old_out_layouts_;
-  TransformMemorizer memorizer_;
 };
 
 // Call registered FTVMAlterOpLayout of an op
@@ -438,10 +453,10 @@ Expr CallAlter(const Call& ref_call,
   Array<Expr> fake_args;
 
   for (size_t i = 0; i < new_args.size(); ++i) {
-    Expr fake_arg = ConvertKeepTuple<Var>(new_args[i], [&](const Expr& arg, size_t idx) {
+    Expr fake_arg = MapTuple<Var>(new_args[i], [&](const Expr &arg, size_t idx) {
       std::stringstream var_name;
       var_name << op->name << "." << ref_call.hash() << "#" << i << "#" << idx;
-      const auto* inp = arg.as<LayoutAlternatedExprNode>();
+      const auto *inp = arg.as<LayoutAlternatedExprNode>();
       CHECK(inp);
       auto new_type = inp->new_type.as<TensorTypeNode>();
       CHECK(new_type);
@@ -450,16 +465,16 @@ Expr CallAlter(const Call& ref_call,
     });
     fake_args.push_back(fake_arg);
 
-    Expr real_arg = ConvertKeepTuple<Expr>(new_args[i], [](const Expr& arg, size_t idx) {
-      const auto* inp = arg.as<LayoutAlternatedExprNode>();
+    Expr real_arg = MapTuple<Expr>(new_args[i], [](const Expr &arg, size_t idx) {
+      const auto *inp = arg.as<LayoutAlternatedExprNode>();
       CHECK(inp);
       return inp->value;
     });
     real_args.push_back(real_arg);
   }
 
-  tvm::Array<tvm::Tensor> tinfos = FlattenArray<tvm::Tensor>(new_args, [](const Expr& arg) {
-    const auto* inp = arg.as<LayoutAlternatedExprNode>();
+  tvm::Array<tvm::Tensor> tinfos = FlatMapTuple<tvm::Tensor>(new_args, [](const Expr &arg) {
+    const auto *inp = arg.as<LayoutAlternatedExprNode>();
     CHECK(inp);
     auto old_type = inp->old_type.as<TensorTypeNode>();
     CHECK(old_type);
@@ -521,26 +536,32 @@ Expr AlterOpLayoutRewrite(const Call &ref_call,
   // because infer_layouts treats tuple input layouts as flatten ones.
   Array<Expr> inputs; // Array<LayoutAlternatedExpr> effectively
   for (auto new_arg : new_args) {
-    Expr input = ConvertKeepTuple<LayoutAlternatedExpr>(
-      new_arg, [&memorizer](const Expr& field, size_t idx) {
+    Expr input = MapTuple<LayoutAlternatedExpr>(
+    new_arg, [&memorizer](const Expr &field, size_t idx) {
       return GetLayoutAlternatedExpr(field, memorizer);
     });
     inputs.push_back(input);
   }
 
-  Array<Layout> old_in = FlattenArray<Layout>(
-    inputs, [](const LayoutAlternatedExpr& e) -> Layout {
-    return e->old_layout;
+  Array<Layout> old_in = FlatMapTuple<Layout>(
+  inputs, [](const Expr &e) -> Layout {
+    const auto *inp = e.as<LayoutAlternatedExprNode>();
+    CHECK(inp);
+    return inp->old_layout;
   });
 
-  Array<Layout> new_in = FlattenArray<Layout>(
-    inputs, [](const LayoutAlternatedExpr& e) -> Layout {
-    return e->new_layout;
+  Array<Layout> new_in = FlatMapTuple<Layout>(
+  inputs, [](const Expr &e) -> Layout {
+    const auto *inp = e.as<LayoutAlternatedExprNode>();
+    CHECK(inp);
+    return inp->new_layout;
   });
 
-  Array<Array<IndexExpr> > input_shapes = FlattenArray<Array<IndexExpr> >(
-    inputs, [](const LayoutAlternatedExpr& e) -> Array<IndexExpr> {
-    return e->old_type.as<TensorTypeNode>()->shape;
+  Array<Array<IndexExpr> > input_shapes = FlatMapTuple<Array<IndexExpr> >(
+  inputs, [](const Expr &e) -> Array<IndexExpr> {
+    const auto *inp = e.as<LayoutAlternatedExprNode>();
+    CHECK(inp);
+    return inp->old_type.as<TensorTypeNode>()->shape;
   });
 
   Array<Layout> old_out, new_out;
@@ -577,11 +598,11 @@ Expr AlterOpLayoutRewrite(const Call &ref_call,
   }
 
   return CallAlter(ref_call, inputs, memorizer, new_in, old_in, old_out);
-  /*
+  /* TODO(yizhi): I don't know why we need this
   if (!new_call->op->is_type<OpNode>()) {
     return Expr(nullptr);
   }
-   */
+  */
 }
 
 // Limiations:
