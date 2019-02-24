@@ -537,7 +537,8 @@ def test_alter_softmax():
         data = x - max_value
         exp_data = relay.exp(data)
         exp_sum = relay.sum(exp_data, axis=1, keepdims=True)
-        return exp_data / exp_sum
+        ret = exp_data / exp_sum
+        return relay.Function([x], ret)
 
     a = before()
     a = infer_type(a)

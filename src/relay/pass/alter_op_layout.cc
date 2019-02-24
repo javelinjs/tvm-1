@@ -222,6 +222,17 @@ class FixLayoutMutator : private ExprMutator {
   Expr Visit() { return ExprMutator::Mutate(input_); }
 
  private:
+  Expr VisitCache_(const Expr& e) {
+    auto it = cache_.find(e.get());
+    LOG(INFO) << " it == cache_.end(): " << (it == cache_.end());
+    if (it != cache_.end()) {
+      return it->second;
+    } else {
+      Expr mutated = ExprMutator::Mutate(e);
+      cache_[e.get()] = mutated;
+      return mutated;
+    }
+  }
   // Post order traversal.
   Expr VisitExpr_(const CallNode* call) final {
     // TODO: call is tuple
@@ -290,10 +301,32 @@ class FixLayoutMutator : private ExprMutator {
       });
       transformed_args.push_back(transformed_arg);
     }
-    Expr new_call = CallNode::make(call->op, transformed_args, call->attrs);
 
-    LOG(INFO) << "(4) infer shape for newly created node." << new_call;
+    LOG(INFO) << "(4) infer shape for newly created node.";
+    Array<Expr> fake_args;
+    idx_flatten = 0;
+    for (const auto& new_alternated_expr_arg : new_alternated_expr_args) {
+      Expr fake_arg = MapTuple<Expr>(new_alternated_expr_arg, [&](const Expr &arg, size_t idx) {
+        const auto *inp = arg.as<LayoutAlternatedExprNode>();
+        CHECK(inp);
+        auto new_type = inp->new_type.as<TensorTypeNode>();
+        CHECK(new_type);
+        Expr var = VarNode::make("fake_arg", TensorTypeNode::make(new_type->shape,
+                                                                  new_type->dtype));
+        var = memorizer_.Transform(var, new_in_layouts[idx_flatten],
+                                   required_in_layouts[idx_flatten]);
+        idx_flatten++;
+        return var;
+      });
+      fake_args.push_back(fake_arg);
+    }
+
+    Expr new_call = CallNode::make(call->op, fake_args, call->attrs);
     new_call = InferType(new_call, Module());
+    auto new_call_checked_type = new_call->checked_type();
+    new_call = CallNode::make(call->op, transformed_args, call->attrs);
+    new_call->checked_type_ = new_call_checked_type;
+
     const size_t num_output = new_call->checked_type()->is_type<TupleTypeNode>() ?
                               new_call->type_as<TupleTypeNode>()->fields.size() : 1;
 
@@ -306,10 +339,9 @@ class FixLayoutMutator : private ExprMutator {
     if (call == input_.get()) {
       // since arg_replacer does not change the root node's type,
       // we can simply backup the type and restore later.
-      auto checked_type = new_call->checked_type_;
       ReplaceArgsMutator args_replacer(args_replacement_flatten_, args_flatten_);
       new_call = args_replacer.Visit(new_call);
-      new_call->checked_type_ = checked_type;
+      new_call->checked_type_ = new_call_checked_type;
     }
 
     if (new_call->checked_type()->is_type<TupleTypeNode>()) {
@@ -369,9 +401,12 @@ class FixLayoutMutator : private ExprMutator {
 
   Expr VisitExpr_(const ConstantNode* op) final {
     auto ret = make_node<LayoutAlternatedExprNode>();
-    ret->value = InferType(GetRef<Expr>(op), Module());
+    auto constant = InferType(GetRef<Expr>(op), Module());
+    ret->value = constant;
     ret->old_layout = Layout::Undef();
     ret->new_layout = Layout::Undef();
+    ret->new_type = constant->checked_type();
+    ret->old_type = constant->checked_type();
     // TODO: type not set, consider to use shape instead.
     ret->memorizer = memorizer_;
     return Expr(ret);
@@ -434,6 +469,8 @@ class FixLayoutMutator : private ExprMutator {
   Array<Layout> new_in_layouts_;
   Array<Layout> old_in_layouts_;
   Array<Layout> old_out_layouts_;
+
+  std::unordered_map<const Node*, Expr> cache_;
 };
 
 // Call registered FTVMAlterOpLayout of an op
