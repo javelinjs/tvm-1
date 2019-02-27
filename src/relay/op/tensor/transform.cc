@@ -218,12 +218,16 @@ Array<Array<Layout>> ConcatenateLayout(
 
   Layout ret;
   if (new_in_layouts.defined()) {  // this function is called after some operators are alternated.
-    Layout::LayoutDim concate_dim = old_in_layouts[0][axis];
-    for (size_t i = 0; i < new_in_layouts.size(); ++i) {
-      if (new_in_layouts[i].ndim() > axis &&
-          new_in_layouts[i][axis] == concate_dim) {
-        ret = new_in_layouts[i];
-        break;
+    CHECK_EQ(new_in_layouts.size(), old_in_layouts.size());
+    if (old_in_layouts[0].defined()) {
+      CHECK(old_in_layouts[0].ndim() > axis);
+      Layout::LayoutDim concate_dim = old_in_layouts[0][axis];
+      for (size_t i = 0; i < new_in_layouts.size(); ++i) {
+        if (new_in_layouts[i].ndim() > axis &&
+            new_in_layouts[i][axis] == concate_dim) {
+          ret = new_in_layouts[i];
+          break;
+        }
       }
     }
   } else {  // this function is called on the original correct relay ir
@@ -235,7 +239,8 @@ Array<Array<Layout>> ConcatenateLayout(
     }
 
     if (ret.ndim() <= axis || Layout::IsSubdim(ret[axis])) {
-      return Array<Array<Layout> > {{Layout::Undef()}, {Layout::Undef()}};
+      return Array<Array<Layout> > {
+        Array<Layout>(old_in_layouts.size(), Layout::Undef()), {Layout::Undef()} };
     }
   }
 

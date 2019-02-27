@@ -549,6 +549,46 @@ def test_alter_softmax():
 
     assert_alpha_equal(b, a)
 
+def test_alter_concat():
+    shape = (1, 512, 1, 1)
+    def before():
+        inputs = []
+        for i in range(4):
+            tensor_name = "data_" + str(i)
+            inputs.append(relay.var(tensor_name, shape=shape))
+        ret = relay.concatenate(tuple(inputs), axis=2)
+        return relay.Function(free_vars(ret), ret)
+
+    @register_alter_op_layout("concatenate", level=111)
+    def alter_concat(attrs, inputs, tinfos):
+        # which creates multiple branches for one single node
+        new_inputs = []
+        t = inputs[0]
+        for i in range(len(t)):
+            s = relay.squeeze(t[i], axis=[-1])
+            new_inputs.append(s)
+        ret = relay.concatenate(tuple(new_inputs), axis=2)
+        return relay.expand_dims(ret, axis=-1)
+
+    def expected():
+        inputs = []
+        for i in range(4):
+            tensor_name = "data_" + str(i)
+            var = relay.var(tensor_name, shape=shape)
+            inputs.append(relay.squeeze(var, axis=[-1]))
+        ret = relay.concatenate(tuple(inputs), axis=2)
+        ret = relay.expand_dims(ret, axis=-1)
+        return relay.Function(free_vars(ret), ret)
+
+    a = before()
+    a = infer_type(a)
+    a = alter_op_layout(a)
+
+    b = expected()
+    b = infer_type(b)
+
+    assert_alpha_equal(b, a)
+
 if __name__ == "__main__":
     test_alter_op()
     test_alter_return_none()
@@ -562,3 +602,4 @@ if __name__ == "__main__":
     test_alter_layout_relu_after_conv()
     test_alter_multiply_const()
     test_alter_softmax()
+    test_alter_concat()
