@@ -10,8 +10,11 @@
 #define TVM_RELAY_PASS_ALTER_OP_LAYOUT_H_
 
 #include <tvm/relay/expr.h>
+#include <tvm/relay/expr_functor.h>
 
 #include "../op/layout.h"
+
+#include <tvm/relay/attrs/transform.h>
 
 namespace tvm {
 namespace relay {
@@ -77,6 +80,7 @@ inline Array<Array<Layout> > BinaryBroadcastLayout(const Attrs& attrs,
     int defined_idx = layouts[0].defined() ? 0 : 1;
     int undef_idx = 1 - defined_idx;
 
+    LOG(INFO) << "old_in_shapes = " << old_in_shapes;
     LOG(INFO) << "old_shapes[" << defined_idx << "] = " << old_in_shapes[defined_idx];
     LOG(INFO) << "old_shapes[" << undef_idx << "] = " << old_in_shapes[undef_idx];
     if (old_in_shapes[undef_idx].size() == 0) {
@@ -118,6 +122,99 @@ inline Array<Array<Layout> > BinaryBroadcastLayout(const Attrs& attrs,
     return Array<Array<Layout> > {layouts, {ret}};
   }
 }
+
+// Memorize layout transform so we can reuse internal transformed nodes
+class TransformMemorizerNode : public Node {
+ public:
+  // map from (Expr, src_layout, dst_layout) to transformed Expr
+  using TransformKey = std::tuple<const Node*, std::string, std::string>;
+  struct key_hash : public std::unary_function<TransformKey , std::size_t> {
+    std::size_t operator()(const TransformKey& k) const {
+      return dmlc::HashCombine<std::string>(dmlc::HashCombine<std::string>(
+      std::hash<const Node*>()(std::get<0>(k)), std::get<1>(k)), (std::get<2>(k)));
+    }
+  };
+
+  std::unordered_map<TransformKey, Expr, key_hash> memo;
+  static constexpr const char *_type_key = "relay.alter_op_layout.TransformMemorizerNode";
+  TVM_DECLARE_NODE_TYPE_INFO(TransformMemorizerNode, Node);
+};
+
+class TransformMemorizer : public NodeRef {
+ public:
+  TransformMemorizer() {}
+  explicit TransformMemorizer(NodePtr<Node> n) : NodeRef(n) {}
+
+  TransformMemorizerNode* operator->() {
+    return static_cast<TransformMemorizerNode*>(node_.get());
+  }
+
+  // Transform layout with memorizer
+  Expr Transform(Expr raw, const Layout& src_layout, const Layout& dst_layout);
+
+  using ContainerType = TransformMemorizerNode;
+};
+
+class AlterOpLayoutMutator : private ExprMutator {
+ public:
+  AlterOpLayoutMutator(const Array<Expr>& inputs,
+                       const bool enable_alter,
+                       TransformMemorizer& memorizer);
+
+  Expr Run(const Expr& e) { return ExprMutator::Mutate(e); }
+
+ private:
+  Expr VisitCache_(const Expr& e);
+
+  Expr VisitExpr_(const CallNode* call) final;
+  Expr VisitExpr_(const VarNode* op) final;
+  Expr VisitExpr_(const ConstantNode* op) final;
+  Expr VisitExpr_(const TupleNode* op) final;
+  Expr VisitExpr_(const FunctionNode* op) final;
+  Expr VisitExpr_(const TupleGetItemNode* op) final;
+
+  Expr VisitExpr_(const GlobalVarNode* op) final {
+    LOG(FATAL) << "AlterLayout does not support " << GetRef<Expr>(op);
+    return Expr(nullptr);
+  }
+  Expr VisitExpr_(const OpNode* op) final {
+    LOG(FATAL) << "not supported " << GetRef<Expr>(op);
+    return Expr(nullptr);
+  }
+  Expr VisitExpr_(const LetNode* op) final {
+    LOG(FATAL) << "not supported " << GetRef<Expr>(op);
+    return Expr(nullptr);
+  }
+  Expr VisitExpr_(const IfNode* op) final {
+    LOG(FATAL) << "not supported " << GetRef<Expr>(op);
+    return Expr(nullptr);
+  }
+  Expr VisitExpr_(const RefCreateNode* op) final {
+    LOG(FATAL) << "not supported " << GetRef<Expr>(op);
+    return Expr(nullptr);
+  }
+  Expr VisitExpr_(const RefReadNode* op) final {
+    LOG(FATAL) << "not supported " << GetRef<Expr>(op);
+    return Expr(nullptr);
+  }
+  Expr VisitExpr_(const RefWriteNode* op) final {
+    LOG(FATAL) << "not supported " << GetRef<Expr>(op);
+    return Expr(nullptr);
+  }
+  Expr VisitExpr_(const ConstructorNode* op) final {
+    LOG(FATAL) << "not supported " << GetRef<Expr>(op);
+    return Expr(nullptr);
+  }
+  Expr VisitExpr_(const MatchNode* op) final {
+    LOG(FATAL) << "not supported " << GetRef<Expr>(op);
+    return Expr(nullptr);
+  }
+
+  const bool enable_alter_;
+  TransformMemorizer memorizer_;
+
+  std::unordered_map<const Node*, Expr> cache_;
+};
 
 }  //  namespace relay
 }  //  namespace tvm

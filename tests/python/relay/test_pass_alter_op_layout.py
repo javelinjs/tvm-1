@@ -589,6 +589,46 @@ def test_alter_concat():
 
     assert_alpha_equal(b, a)
 
+def test_alter_split():
+    shape = (1, 64, 56, 56)
+    def before():
+        data = relay.var("data", shape=shape)
+        splits = relay.split(data, indices_or_sections=2, axis=2)
+        outputs = []
+        for i in range(len(splits)):
+            outputs.append(relay.nn.relu(splits[i]))
+        ret = relay.Tuple(outputs)
+        return relay.Function(free_vars(ret), ret)
+
+    @register_alter_op_layout("split", level=112)
+    def alter_split(attrs, inputs, tinfos):
+        outputs = []
+        splits = relay.split(inputs[0], indices_or_sections=2, axis=2)
+        for i in range(len(splits)):
+            outputs.append(relay.nn.relu(splits[i]))
+        return relay.Tuple(outputs)
+
+    def expected():
+        outputs = []
+        data = relay.var("data", shape=shape)
+        splits = relay.split(data, indices_or_sections=2, axis=2)
+        for i in range(len(splits)):
+            branch = relay.nn.relu(splits[i])
+            branch = relay.nn.relu(branch)
+            outputs.append(branch)
+        ret = relay.Tuple(outputs)
+        return relay.Function(free_vars(ret), ret)
+
+    a = before()
+    a = infer_type(a)
+    a = alter_op_layout(a)
+
+    b = expected()
+    b = infer_type(b)
+
+    assert_alpha_equal(b, a)
+
+
 if __name__ == "__main__":
     test_alter_op()
     test_alter_return_none()
@@ -603,3 +643,4 @@ if __name__ == "__main__":
     test_alter_multiply_const()
     test_alter_softmax()
     test_alter_concat()
+    test_alter_split()
