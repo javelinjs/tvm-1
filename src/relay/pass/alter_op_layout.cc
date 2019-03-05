@@ -71,7 +71,7 @@ class LayoutAlternatedExprNode : public TempExprNode {
       Tuple t = Downcast<Tuple>(value);
       Array<Expr> fields;
       for (size_t i = 0; i < t->fields.size(); ++i) {
-        const auto* inp = t->fields[i].as<LayoutAlternatedExprNode>();
+        const auto *inp = t->fields[i].as<LayoutAlternatedExprNode>();
         if (inp) {
           fields.push_back(inp->Realize());
         } else {
@@ -79,6 +79,10 @@ class LayoutAlternatedExprNode : public TempExprNode {
         }
       }
       return TupleNode::make(fields);
+    } else if (value->checked_type()->is_type<TupleTypeNode>()) {
+      // do not do any transform for tuple-type call node.
+      // FIXME: TupleGetItem and do transform(new_layouts[i], old_layouts[i])
+      return value;
     } else {
       CHECK_EQ(old_layouts.size(), 1);
       CHECK_EQ(new_layouts.size(), 1);
@@ -470,6 +474,11 @@ Expr AlterOpLayoutMutator::VisitExpr_(const CallNode* call) {
     LOG(INFO) << "request_new_layouts = " << request_new_layouts;
     for (auto l : request_new_layouts) LOG(INFO) << l;
     CHECK_EQ(provided_new_layouts.size(), request_new_layouts.size());
+    for (size_t i = 0; i < provided_new_layouts.size(); ++i) {
+      if (!provided_new_layouts[i].defined()) {
+        provided_new_layouts.Set(i, request_new_layouts[i]);
+      }
+    }
 
     LOG(INFO) << "(5) generate layout transform";
     ReplaceArgsMutator input_replacer =
