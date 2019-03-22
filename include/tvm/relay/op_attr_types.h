@@ -8,6 +8,7 @@
 
 #include <tvm/tensor.h>
 #include <tvm/schedule.h>
+#include <tvm/data_layout.h>
 #include <tvm/build_module.h>
 #include <tvm/relay/type.h>
 #include <tvm/relay/expr.h>
@@ -105,6 +106,13 @@ using FTVMAlterOpLayout = runtime::TypedPackedFunc<
   Expr(const Attrs& attrs,
        const Array<Expr>& args,
        const Array<Tensor>& tinfos)>;
+
+using FTVMAlterOperator = runtime::TypedPackedFunc<
+  Expr(const Attrs& attrs,
+       const Array<Expr>& args,
+       const Array<Tensor>& tinfos,
+       const Array<BijectiveLayout>& in_layouts,
+       const Array<BijectiveLayout>& out_layouts)>;
 
 /*!
  * \brief Forward rewriting rule for a specific op.

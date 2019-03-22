@@ -741,6 +741,10 @@ def alter_op_layout(expr):
     return _ir_pass.AlterOpLayout(expr)
 
 
+def alter_operator(expr):
+    return _ir_pass.alter_operator(expr)
+
+
 def rewrite_annotated_ops(expr, fallback_device):
     """Rewrite the annotated program where annotation operators, e.g.
     `on_deivce`, mark which device an expression should be scheduled to.

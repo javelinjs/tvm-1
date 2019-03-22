@@ -271,6 +271,12 @@ class BijectiveLayout(NodeBase):
     --------
     bijective_layout : Declare a bijective layout converter
     """
+    def __str__(self):
+        return str(self.src_layout) + " -> " + str(self.dst_layout)
+
+    def __repr__(self):
+        return "BijectiveLayout(" + str(self.src_layout) + " -> " + str(self.dst_layout) + ")"
+
     def forward_index(self, index):
         """Given the indices of the src-layout, infer the dst index.
 
