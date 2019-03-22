@@ -152,6 +152,23 @@ def register_alter_op_layout(op_name, alter_layout=None, level=10):
     return register(op_name, "FTVMAlterOpLayout", alter_layout, level)
 
 
+def register_alter_operator(op_name, alter_op=None, level=10):
+    """Register alter operator function for an op
+
+    Parameters
+    ----------
+    op_name : str
+        The name of the operator
+
+    alter_op: function (attrs: Attrs, inputs: List[Expr]) -> new_expr: Expr
+        The function for changing the layout or replacing the operator
+
+    level : int
+        The priority level
+    """
+    return register(op_name, "FTVMAlterOperator", alter_op, level)
+
+
 def register_pattern(op_name, pattern, level=10):
     """Register operator pattern for an op.
 

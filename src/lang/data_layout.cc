@@ -311,7 +311,9 @@ BijectiveLayout BijectiveLayoutNode::make(const Layout& src_layout,
   n->src_layout = src_layout;
   n->dst_layout = dst_layout;
 
-  if (!GetStoreRule(&n->forward_rule, n->src_layout, n->dst_layout)) {
+  if (!src_layout.defined() || !dst_layout.defined()) {
+    return BijectiveLayout();
+  } else if (!GetStoreRule(&n->forward_rule, n->src_layout, n->dst_layout)) {
     // not convertible
     return BijectiveLayout();
   }
