@@ -101,33 +101,28 @@ inline bool IsIndexType(const Type& type) {
 // specialization of constant folders.
 template<>
 inline Expr TryConstFold<ir::Add>(Expr a, Expr b) {
-  TVM_ARITH_CONST_PROPAGATION({
+  TVM_INDEX_CONST_PROPAGATION({
       const Type& rtype = a.type();
       if (pa && pb) return IntImm::make(rtype, pa->value + pb->value);
       if (pa && pa->value == 0) return b;
       if (pb && pb->value == 0) return a;
-      if (fa && fb) return FloatImm::make(rtype, fa->value + fb->value);
-      if (fa && fa->value == 0) return b;
-      if (fb && fb->value == 0) return a;
     });
   return Expr();
 }
 
 template<>
 inline Expr TryConstFold<ir::Sub>(Expr a, Expr b) {
-  TVM_ARITH_CONST_PROPAGATION({
+  TVM_INDEX_CONST_PROPAGATION({
       const Type& rtype = a.type();
       if (pa && pb) return IntImm::make(rtype, pa->value - pb->value);
       if (pb && pb->value == 0) return a;
-      if (fa && fb) return FloatImm::make(rtype, fa->value - fb->value);
-      if (fb && fb->value == 0) return a;
     });
   return Expr();
 }
 
 template<>
 inline Expr TryConstFold<ir::Mul>(Expr a, Expr b) {
-  TVM_ARITH_CONST_PROPAGATION({
+  TVM_INDEX_CONST_PROPAGATION({
       const Type& rtype = a.type();
       if (pa && pb) return IntImm::make(rtype, pa->value * pb->value);
       if (pa) {
@@ -138,22 +133,13 @@ inline Expr TryConstFold<ir::Mul>(Expr a, Expr b) {
         if (pb->value == 1) return a;
         if (pb->value == 0) return b;
       }
-      if (fa && fb) return FloatImm::make(rtype, fa->value * fb->value);
-      if (fa) {
-        if (fa->value == 1) return b;
-        if (fa->value == 0) return a;
-      }
-      if (fb) {
-        if (fb->value == 1) return a;
-        if (fb->value == 0) return b;
-      }
     });
   return Expr();
 }
 
 template<>
 inline Expr TryConstFold<ir::Div>(Expr a, Expr b) {
-  TVM_ARITH_CONST_PROPAGATION({
+  TVM_INDEX_CONST_PROPAGATION({
       const Type& rtype = a.type();
       // due to division and mod can have different modes
       // only constant fold positive number where rule is fixed.
@@ -166,14 +152,6 @@ inline Expr TryConstFold<ir::Div>(Expr a, Expr b) {
       if (pb) {
         if (pb->value == 1) return a;
         CHECK_NE(pb->value, 0) << "Divide by zero";
-      }
-      if (fa && fb && fb->value != 0) {
-        return FloatImm::make(rtype, fa->value / fb->value);
-      }
-      if (fa && fa->value == 0) return a;
-      if (fb) {
-        if (fb->value == 1) return a;
-        CHECK_NE(fb->value, 0) << "Divide by zero";
       }
     });
   return Expr();
@@ -201,20 +179,18 @@ inline Expr TryConstFold<ir::Mod>(Expr a, Expr b) {
 
 template<>
 inline Expr TryConstFold<ir::Min>(Expr a, Expr b) {
-  TVM_ARITH_CONST_PROPAGATION({
+  TVM_INDEX_CONST_PROPAGATION({
       const Type& rtype = a.type();
       if (pa && pb) return IntImm::make(rtype, std::min(pa->value, pb->value));
-      if (fa && fb) return FloatImm::make(rtype, std::min(fa->value, fb->value));
     });
   return Expr();
 }
 
 template<>
 inline Expr TryConstFold<ir::Max>(Expr a, Expr b) {
-  TVM_ARITH_CONST_PROPAGATION({
+  TVM_INDEX_CONST_PROPAGATION({
       const Type& rtype = a.type();
       if (pa && pb) return IntImm::make(rtype, std::max(pa->value, pb->value));
-      if (fa && fb) return FloatImm::make(rtype, std::max(fa->value, fb->value));
     });
   return Expr();
 }
