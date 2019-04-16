@@ -985,7 +985,8 @@ bool ArangeRel(const Array<Type>& types,
   CHECK_EQ(types.size(), 1);
   const ArangeAttrs* param = attrs.as<ArangeAttrs>();
   IndexExpr num_elem = tvm::cast(tvm::Int(32), tvm::ceil(
-      tvm::cast(tvm::Float(32), param->stop - param->start) / param->step));
+      ir::Simplify(tvm::cast(tvm::Float(32), param->stop - param->start) / param->step)));
+  num_elem = ir::Simplify(num_elem);
   if (const tvm::ir::IntImm* val = num_elem.as<tvm::ir::IntImm>()) {
     CHECK_GT(val->value, 0)
         << "Invalid arange attributes (start, stop, step): " << param->start
