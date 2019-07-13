@@ -25,6 +25,7 @@
 #include <tvm/data_layout.h>
 #include <tvm/relay/op.h>
 #include <tvm/relay/attrs/nn.h>
+#include <tvm/relay/layout.h>
 #include <vector>
 
 #include "../../pass/alter_op_layout.h"
@@ -139,6 +140,19 @@ Array<Array<Layout> > Conv2DInferCorrectLayout(
                                    params->data_layout : params->out_layout}};
 }
 
+template<typename T>
+bool Conv2DInferLayout(const Array<RelayLayout>& layouts,
+                       const Array<Type>& types,
+                       int num_inputs,
+                       const Attrs& attrs,
+                       const LayoutReporter& reporter) {
+  const T* params = attrs.as<T>();
+  reporter->Assign(0, TensorLayoutNode::make(LayoutNode::make(params->data_layout)));
+  reporter->Assign(1, TensorLayoutNode::make(LayoutNode::make(params->kernel_layout)));
+  reporter->Assign(2, TensorLayoutNode::make(LayoutNode::make(params->data_layout)));
+  return true;
+}
+
 // Positional relay function to create conv2d operator
 // used by frontend FFI.
 Expr MakeConv2D(Expr data,
@@ -192,7 +206,8 @@ with the layer input to produce a tensor of outputs.
 .add_argument("weight", "Tensor", "The weight tensor.")
 .set_support_level(2)
 .add_type_rel("Conv2D", Conv2DRel)
-.set_attr<FInferCorrectLayout>("FInferCorrectLayout", Conv2DInferCorrectLayout<Conv2DAttrs>);
+.set_attr<FInferCorrectLayout>("FInferCorrectLayout", Conv2DInferCorrectLayout<Conv2DAttrs>)
+.set_attr<FInferLayout>("FInferLayout", Conv2DInferLayout<Conv2DAttrs>);
 
 
 // relay.nn.conv2d_transpose

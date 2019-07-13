@@ -397,6 +397,10 @@ def CombineParallelConv2D(min_num_branches=3):
     return _transform.CombineParallelConv2D(min_num_branches)
 
 
+def InferLayout():
+    return _transform.CollectLayoutInfo()
+
+
 def AlterOpLayout():
     """Alternate the layouts of operators or replace primitive operators with
     other expressions.

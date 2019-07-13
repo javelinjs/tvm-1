@@ -42,133 +42,183 @@
 #include <tvm/relay/error.h>
 #include <tvm/relay/expr_functor.h>
 #include <tvm/relay/pattern_functor.h>
-#include <tvm/relay/pass.h>
 #include <tvm/data_layout.h>
+#include <tvm/relay/transform.h>
+#include <tvm/relay/layout.h>
 #include "./pass_util.h"
-#include "type_solver.h"
 #include "../ir/type_functor.h"
 
 namespace tvm {
 namespace relay {
 
-/*! \brief Base type of the Relay Layout hierarchy. */
-class BaseLayoutNode : public RelayNode {
-public:
-  static constexpr const char* _type_key = "relay.Layout";
-  TVM_DECLARE_BASE_NODE_INFO(BaseLayoutNode, Node);
-};
-
-class BaseLayout : public NodeRef {
-public:
-  BaseLayout() {}
-  explicit BaseLayout(NodePtr<tvm::Node> p) : NodeRef(p) {}
-  using ContainerType = BaseLayoutNode;
-};
-
-class TensorLayout;
-/*! \brief TensorType container node */
-class TensorLayoutNode : public BaseLayoutNode {
-public:
-  Layout layout;
-
-  void VisitAttrs(tvm::AttrVisitor *v) final {
-    v->Visit("layout", &layout);
-  }
-
-  TVM_DLL static TensorLayout make(Layout layout);
-
-  static constexpr const char* _type_key = "relay.TensorLayout";
-
-  TVM_DECLARE_NODE_TYPE_INFO(TensorLayoutNode, BaseLayoutNode);
-};
-
-RELAY_DEFINE_NODE_REF(TensorLayout, TensorLayoutNode, BaseLayout);
-
-TensorLayout TensorLayoutNode::make(Layout layout) {
-  NodePtr<TensorLayoutNode> n = make_node<TensorLayoutNode>();
-  n->layout = std::move(layout);
-  return TensorLayout(n);
-}
-
-class TupleLayout;
-/*!
- * \brief TupleType container.
- */
-class TupleLayoutNode : public BaseLayoutNode {
-public:
-  /*! \brief The type of each field in the tuple. */
-  tvm::Array<Layout> fields;
-
-  TupleLayoutNode() {}
-
-  void VisitAttrs(tvm::AttrVisitor* v) final {
-    v->Visit("fields", &fields);
-  }
-
-  TVM_DLL static TupleLayout make(tvm::Array<Layout> fields);
-
-  static constexpr const char* _type_key = "relay.TupleLayout";
-  TVM_DECLARE_NODE_TYPE_INFO(TupleLayoutNode, BaseLayoutNode);
-};
-
-RELAY_DEFINE_NODE_REF(TupleLayout, TupleLayoutNode, BaseLayout);
-
-TupleLayout TupleLayoutNode::make(Array<Layout> fields) {
-  NodePtr<TupleLayoutNode> n = make_node<TupleLayoutNode>();
-  n->fields = std::move(fields);
-  return TupleLayout(n);
-}
-
-class LayoutInferencer : private ExprFunctor<Type(const Expr&)> {
+class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
  public:
   // inference the type of expr.
-  Expr Infer(Expr expr);
-
- private:
-  // Visitor Logic
-  Type VisitExpr_(const VarNode* op) final { }
-
-  Type VisitExpr_(const GlobalVarNode* op) final {
-    // module.lookup(var)
+  Expr Infer(Expr expr) {
+    this->VisitExpr(expr);
+    return expr;
   }
 
-  Type VisitExpr_(const ConstantNode* op) final { }
+  Map<Expr, Array<Layout> > CollectLayoutInfo() {
+    Map<Expr, Array<Layout> > map;
+    for (auto& iter : layout_map_) {
+      auto layout = iter.second;
+      if (auto* tensor_layout = layout.as<TensorLayoutNode>()) {
+        map.Set(iter.first, Array<Layout>({tensor_layout->layout}));
+      } else {
+        auto* tuple_layout = layout.as<TupleLayoutNode>();
+        CHECK(tuple_layout);
+        map.Set(iter.first, tuple_layout->fields);
+      }
+    }
+    return map;
+  }
 
-  Type VisitExpr_(const TupleNode* op) final { }
+ private:
+  // map from expression to checked type
+  // type inferencer will populate it up
+//  std::unordered_map<Expr, RelayLayout, NodeHash, NodeEqual> layout_map_;
+  Map<Expr, RelayLayout> layout_map_;
 
-  Type VisitExpr_(const TupleGetItemNode* op) final { }
+  RelayLayout GetLayout(const Expr& expr, const Layout& default_layout = Layout::Undef()) {
+    auto it = layout_map_.find(expr);
+    if (it == layout_map_.end()) {
+      const size_t num_outputs = expr->checked_type()->is_type<TupleTypeNode>() ?
+                                 expr->type_as<TupleTypeNode>()->fields.size() : 1;
+      RelayLayout olayout;
+      if (num_outputs == 1) {
+        olayout = TensorLayoutNode::make(default_layout);
+      } else {
+        olayout = TupleLayoutNode::make(Array<Layout>(num_outputs, default_layout));
+      }
+      layout_map_.Set(expr, olayout);
+      return olayout;
+    }
+    return layout_map_[expr];
+  }
 
-  Type VisitExpr_(const MatchNode* op) final { }
+  // Visitor Logic
+  RelayLayout VisitExpr_(const VarNode* op) final {
+    return GetLayout(GetRef<Var>(op));
+  }
 
-  Type VisitExpr_(const OpNode* op) final { }
+  RelayLayout VisitExpr_(const GlobalVarNode* op) final {
+    // module.lookup(var)
+    LOG(FATAL) << "GlobalVarNode";
+  }
 
-  Type VisitExpr_(const LetNode* let) final { }
+  RelayLayout VisitExpr_(const ConstantNode* op) final {
+    LOG(FATAL) << "ConstantNode";
+  }
 
-  Type VisitExpr_(const IfNode* ite) final { }
+  RelayLayout VisitExpr_(const TupleNode* op) final {
+    LOG(FATAL) << "TupleNode";
+  }
 
-  Type VisitExpr_(const CallNode* call) final { }
+  RelayLayout VisitExpr_(const TupleGetItemNode* op) final {
+    LOG(FATAL) << "TupleGetItemNode";
+  }
 
-  Type VisitExpr_(const FunctionNode* f) final { }
+  RelayLayout VisitExpr_(const OpNode* op) final {
+    LOG(FATAL) << "OpNode";
+  }
 
-  Type VisitExpr_(const RefCreateNode* op) final { }
+  RelayLayout VisitExpr_(const LetNode* let) final {
+    LOG(FATAL) << "LetNode";
+  }
 
-  Type VisitExpr_(const RefReadNode* op) final { }
+  RelayLayout VisitExpr_(const IfNode* ite) final {
+    LOG(FATAL) << "IfNode";
+  }
 
-  Type VisitExpr_(const RefWriteNode* op) final { }
+  RelayLayout VisitExpr_(const CallNode* call) final {
+    Array<RelayLayout> layouts;
+    Array<Type> types;
+    Array<Expr> nodes;
 
-  Type VisitExpr_(const ConstructorNode* c) final { }
+    for (auto arg : call->args) {
+      auto arg_layout = GetLayout(arg);
+      layouts.push_back(arg_layout);
+      types.push_back(arg->checked_type());
+      nodes.push_back(arg);
+    }
+
+    layouts.push_back(GetLayout(GetRef<Call>(call)));
+    types.push_back(call->checked_type());
+    nodes.push_back(GetRef<Call>(call));
+
+    static auto finfer_layout = Op::GetAttr<FInferLayout>("FInferLayout");
+
+    bool infer_success = false;
+    Op op = Downcast<Op>(call->op);
+    if (finfer_layout.count(op)) {
+      auto reporter = LayoutReporterNode::make(nodes);
+      infer_success = finfer_layout[op](layouts, types, call->args.size(), call->attrs, reporter);
+      if (infer_success) {
+        for (auto& it : reporter->layout_map) {
+          this->layout_map_.Set(it.first, it.second);
+        }
+      }
+    }
+    return layouts[layouts.size()-1];
+  }
+
+  RelayLayout VisitExpr_(const FunctionNode* f) final {
+    // TODO: params
+    return this->VisitExpr(f->body);
+  }
+
+  RelayLayout VisitExpr_(const MatchNode* op) final {
+    LOG(FATAL) << "MatchNode";
+  }
+
+  RelayLayout VisitExpr_(const RefCreateNode* op) final {
+    LOG(FATAL) << "RefCreateNode";
+  }
+
+  RelayLayout VisitExpr_(const RefReadNode* op) final {
+    LOG(FATAL) << "RefReadNode";
+  }
+
+  RelayLayout VisitExpr_(const RefWriteNode* op) final {
+    LOG(FATAL) << "RefWriteNode";
+  }
+
+  RelayLayout VisitExpr_(const ConstructorNode* c) final {
+    LOG(FATAL) << "ConstructorNode";
+  }
 };
 
-Expr LayoutInferencer::Infer(Expr expr) {
+Expr InferLayout(const Expr& expr, const Module& mod_ref) {
+  // TODO
+  return LayoutInferencer().Infer(expr);
 }
 
-Function InferLayout(const Expr& func) {
+Map<Expr, Array<Layout> > CollectLayoutInfo(const Expr& expr) {
+  LayoutInferencer inferencer;
+  inferencer.Infer(expr);
+  return inferencer.CollectLayoutInfo();
 }
 
-TVM_REGISTER_API("relay._ir_pass.infer_layout")
-.set_body_typed<Expr(const Expr&)>([](const Expr& expr) {
-  return InferLayout(expr);
+TVM_REGISTER_API("relay._analysis.CollectLayoutInfo")
+.set_body_typed(CollectLayoutInfo);
+
+namespace transform {
+
+Pass InferLayout() {
+  runtime::TypedPackedFunc<Function(Function, Module, PassContext)> pass_func =
+      [=](Function f, Module m, PassContext pc) {
+        return Downcast<Function>(InferLayout(f, m));
+      };
+  return CreateFunctionPass(pass_func, 0, "InferLayout", {ir::StringImm::make("InferType")});
+}
+
+TVM_REGISTER_API("relay._transform.InferLayout")
+.set_body_typed<Pass()>([]() {
+  return InferLayout();
 });
+
+}  // namespace transform
 
 }  // namespace relay
 }  // namespace tvm

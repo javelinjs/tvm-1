@@ -280,6 +280,10 @@ def collect_device_annotation_ops(expr):
     return _analysis.CollectDeviceAnnotationOps(expr)
 
 
+def collect_layout(expr):
+    return _analysis.CollectLayoutInfo(expr)
+
+
 def get_total_mac_number(expr):
     """
     Count the number of MACs (multiply-accumulate) of a model
