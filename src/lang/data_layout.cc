@@ -195,6 +195,11 @@ int32_t Layout::FactorOf(const LayoutAxis& axis) const {
   return -1;
 }
 
+TVM_STATIC_IR_FUNCTOR(IRPrinter, vtable)
+.set_dispatch<LayoutNode>([](const LayoutNode *l, IRPrinter *p) {
+    p->stream << "Layout(" << l->name << ")";
+  });
+
 inline bool GetStoreRule(Array<Expr>* rule,
                          const Layout& src_layout,
                          const Layout& dst_layout) {

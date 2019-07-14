@@ -38,7 +38,7 @@ def test_broadcast():
     layout_map = collect_layout(f)
     print(f.params)
     print("bias layout = ", layout_map[f.params[2]][0])
-    # print("haha", layout_map)
+    print("haha", layout_map)
 
 
 def test_conv2d():
