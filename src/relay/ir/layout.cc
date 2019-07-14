@@ -39,16 +39,17 @@ TupleLayout TupleLayoutNode::make(Array<Layout> fields) {
   return TupleLayout(n);
 }
 
-LayoutReporter LayoutReporterNode::make(tvm::Array<Expr> node) {
+LayoutReporter LayoutReporterNode::make(Array<Expr> args, Array<RelayLayout> args_layout) {
   NodePtr<LayoutReporterNode> n = make_node<LayoutReporterNode>();
-  n->node = std::move(node);
+  n->args = std::move(args);
+  n->args_layout = std::move(args_layout);
   return LayoutReporter(n);
 }
 
 void LayoutReporterNode::Assign(size_t index, const RelayLayout& layout) {
-  CHECK_LT(index, this->node.size()) << "Index " << index << " out of bound. Size =  "
-                                     << this->node.size();
-  this->layout_map.Set(this->node[index], layout);
+  CHECK_LT(index, this->args.size()) << "Index " << index << " out of bound. Size =  "
+                                     << this->args.size();
+  this->results.Set(this->args[index], layout);
 }
 
 }  // namespace relay

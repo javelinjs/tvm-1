@@ -71,8 +71,9 @@ class LayoutReporter;
  */
 class LayoutReporterNode : public Node {
  public:
-  tvm::Array<Expr> node;
-  tvm::Map<Expr, RelayLayout> layout_map;
+  tvm::Array<Expr> args;
+  tvm::Array<RelayLayout> args_layout;
+  tvm::Map<Expr, RelayLayout> results;
   /*!
    * \brief Create a type equality constraint.
    *
@@ -81,12 +82,13 @@ class LayoutReporterNode : public Node {
    *  But it is possible for the solver to resolve src by dst as well.
    */
   TVM_DLL void Assign(size_t index, const RelayLayout& layout);
-  TVM_DLL static LayoutReporter make(tvm::Array<Expr> node);
+  TVM_DLL static LayoutReporter make(tvm::Array<Expr> args, tvm::Array<RelayLayout> args_layout);
 
   // solver is not serializable.
   void VisitAttrs(tvm::AttrVisitor* v) final {
-    v->Visit("data", &node);
-    v->Visit("layout_map", &layout_map);
+    v->Visit("args", &args);
+    v->Visit("args_layout", &args_layout);
+    v->Visit("results", &results);
   }
 
   static constexpr const char* _type_key = "relay.LayoutReporter";

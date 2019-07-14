@@ -22,14 +22,23 @@ from tvm.relay import transform, analysis
 from tvm.relay.analysis import collect_layout
 
 
-def run_opt_pass(expr, passes):
-    passes = passes if isinstance(passes, list) else [passes]
-    mod = relay.Module.from_expr(expr)
-    seq = transform.Sequential(passes)
-    with transform.PassContext(opt_level=3):
-        mod = seq(mod)
-    entry = mod[mod.entry_func]
-    return entry if isinstance(expr, relay.Function) else entry.body
+def test_broadcast():
+    x = relay.var('x', shape=(1, 64, 56, 56))
+    weight = relay.var("weight")
+    y = relay.nn.conv2d(x, weight, channels=64, kernel_size=(3, 3), padding=(1, 1))
+
+    bias = relay.var("bias", shape=(56,))
+    z = relay.add(y, bias)
+    z = relay.Function(analysis.free_vars(z), z)
+
+    mod = relay.Module.from_expr(z)
+    mod = transform.InferType()(mod)
+    f = mod[mod.entry_func]
+    f = f if isinstance(f, relay.Function) else f.body
+    layout_map = collect_layout(f)
+    print(f.params)
+    print("bias layout = ", layout_map[f.params[2]][0])
+    # print("haha", layout_map)
 
 
 def test_conv2d():
@@ -46,7 +55,10 @@ def test_conv2d():
 
     layout_map = collect_layout(f)
     print(layout_map)
+    print(f.params)
+    print("x layout = ", layout_map[f.params[0]][0])
 
 
 if __name__ == "__main__":
-    test_conv2d()
+    test_broadcast()
+    # test_conv2d()
