@@ -18,6 +18,12 @@ class RelayLayout : public NodeRef {
  public:
   RelayLayout() {}
   explicit RelayLayout(NodePtr<tvm::Node> p) : NodeRef(p) {}
+  /*!
+   * \brief Whether the two layouts are equal.
+   * \param rhs Another layout.
+   * \return whether the two layouts are equal.
+   */
+  inline bool Equals(const RelayLayout &rhs) const;
   using ContainerType = RelayLayoutNode;
 };
 

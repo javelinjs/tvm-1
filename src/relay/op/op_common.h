@@ -46,11 +46,32 @@ inline std::vector<T> AsVector(const Array<T> &array) {
     return result;
 }
 
+inline bool UnaryInferLayout(const Array<RelayLayout>& layouts,
+                             const Array<Type>& types,
+                             int num_inputs,
+                             const Attrs& attrs,
+                             const LayoutReporter& reporter) {
+  CHECK_EQ(layouts.size(), 2);
+  const auto* pin = layouts[0].as<TensorLayoutNode>();
+  const auto* pout = layouts[1].as<TensorLayoutNode>();
+  CHECK(pin && pout);
+  const Layout in = pin->layout;
+  const auto out = pout->layout;
+  if ((in.defined() && out.defined()) || (!in.defined() && !out.defined())) {
+    CHECK(in.Equals(out));
+    return false;
+  }
+  const auto tmp = in.defined() ? in : out;
+  size_t index = in.defined() ? 1 : 0;
+  reporter->Assign(index, TensorLayoutNode::make(tmp));
+  return true;
+}
+
 inline bool BinaryBroadcastInferLayout(const Array<RelayLayout>& layouts,
-                                const Array<Type>& types,
-                                int num_inputs,
-                                const Attrs& attrs,
-                                const LayoutReporter& reporter) {
+                                       const Array<Type>& types,
+                                       int num_inputs,
+                                       const Attrs& attrs,
+                                       const LayoutReporter& reporter) {
   CHECK_EQ(layouts.size(), 3);
   CHECK_EQ(types.size(), 3);
 
@@ -120,6 +141,8 @@ inline bool BinaryBroadcastInferLayout(const Array<RelayLayout>& layouts,
     .set_attr<TOpIsStateful>("TOpIsStateful", false)        \
     .set_attr<FInferCorrectLayout>("FInferCorrectLayout",   \
                                    ElemwiseArbitraryLayout) \
+    .set_attr<FInferLayout>("FInferLayout",                 \
+                            UnaryInferLayout)
 
 
 /*! Quick helper macro

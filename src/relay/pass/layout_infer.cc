@@ -53,9 +53,27 @@ namespace relay {
 
 class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
  public:
+  LayoutInferencer() : modified_(false), timestamp_(0) {}
+
+  explicit LayoutInferencer(Map<Expr, Array<Layout> >& in_layouts) {
+    for (auto it : in_layouts) {
+      CHECK_GT(it.second.size(), 0);
+      if (it.second.size() == 1) {
+        layout_map_.Set(it.first, TensorLayoutNode::make(it.second[0]));
+      } else {
+        layout_map_.Set(it.first, TupleLayoutNode::make(it.second));
+      }
+    }
+  }
+
   // inference the type of expr.
   Expr Infer(Expr expr) {
     this->VisitExpr(expr);
+    while (modified_) {
+      modified_ = false;
+      timestamp_++;
+      this->Infer(expr);
+    }
     return expr;
   }
 
@@ -79,8 +97,11 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
   // type inferencer will populate it up
 //  std::unordered_map<Expr, RelayLayout, NodeHash, NodeEqual> layout_map_;
   Map<Expr, RelayLayout> layout_map_;
+  std::unordered_map<Expr, int, NodeHash, NodeEqual> layout_timestamp_;
+  bool modified_;
+  int timestamp_;
 
-  RelayLayout GetLayout(const Expr& expr, const Layout& default_layout = Layout::Undef()) {
+  RelayLayout GetLayout(const Expr& expr) {
     auto it = layout_map_.find(expr);
     if (it == layout_map_.end()) {
       auto layout = this->VisitExpr(expr);
@@ -101,21 +122,28 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
     } else {
       olayout = TupleLayoutNode::make(Array<Layout>(num_outputs, default_layout));
     }
+    modified_ = true;
     layout_map_.Set(expr, olayout);
     return olayout;
   }
 
+  void UpdateLayoutCache(const Expr& expr, const RelayLayout& layout) {
+    if (!layout_map_.count(expr) || !layout_map_[expr].Equals(layout)) {
+      layout_map_.Set(expr, layout);
+      layout_timestamp_[expr] = timestamp_;
+      modified_ = true;
+    }
+  }
+
   void UpdateLayoutCache(const LayoutReporter& reporter) {
     for (auto& it : reporter->results) {
-      this->layout_map_.Set(it.first, it.second);
+      UpdateLayoutCache(it.first, it.second);
     }
   }
 
   // Visitor Logic
   RelayLayout VisitExpr_(const VarNode* op) final {
-    auto layout = TensorLayoutNode::make(Layout::Undef());
-    layout_map_.Set(GetRef<Var>(op), layout);
-    return std::move(layout);
+    return GetCachedLayout(GetRef<Var>(op));
   }
 
   RelayLayout VisitExpr_(const GlobalVarNode* op) final {
@@ -203,12 +231,12 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
   }
 };
 
-Expr InferLayout(const Expr& expr, const Module& mod_ref) {
-  // TODO
-  return LayoutInferencer().Infer(expr);
-}
+//Expr InferLayout(const Expr& expr, const Module& mod_ref) {
+//  // TODO
+//  return LayoutInferencer().Infer(expr);
+//}
 
-Map<Expr, Array<Layout> > CollectLayoutInfo(const Expr& expr) {
+Map<Expr, Array<Layout> > CollectLayoutInfo(const Expr& expr) {// Map<Expr, Array<Layout> > in_layouts) {
   LayoutInferencer inferencer;
   inferencer.Infer(expr);
   return inferencer.CollectLayoutInfo();
@@ -217,22 +245,22 @@ Map<Expr, Array<Layout> > CollectLayoutInfo(const Expr& expr) {
 TVM_REGISTER_API("relay._analysis.CollectLayoutInfo")
 .set_body_typed(CollectLayoutInfo);
 
-namespace transform {
+//namespace transform {
 
-Pass InferLayout() {
-  runtime::TypedPackedFunc<Function(Function, Module, PassContext)> pass_func =
-      [=](Function f, Module m, PassContext pc) {
-        return Downcast<Function>(InferLayout(f, m));
-      };
-  return CreateFunctionPass(pass_func, 0, "InferLayout", {ir::StringImm::make("InferType")});
-}
+//Pass InferLayout() {
+//  runtime::TypedPackedFunc<Function(Function, Module, PassContext)> pass_func =
+//      [=](Function f, Module m, PassContext pc) {
+//        return Downcast<Function>(InferLayout(f, m));
+//      };
+//  return CreateFunctionPass(pass_func, 0, "InferLayout", {ir::StringImm::make("InferType")});
+//}
 
-TVM_REGISTER_API("relay._transform.InferLayout")
-.set_body_typed<Pass()>([]() {
-  return InferLayout();
-});
+//TVM_REGISTER_API("relay._transform.InferLayout")
+//.set_body_typed<Pass()>([]() {
+//  return InferLayout();
+//});
 
-}  // namespace transform
+//}  // namespace transform
 
 }  // namespace relay
 }  // namespace tvm

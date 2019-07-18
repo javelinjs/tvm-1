@@ -280,8 +280,8 @@ def collect_device_annotation_ops(expr):
     return _analysis.CollectDeviceAnnotationOps(expr)
 
 
-def collect_layout(expr):
-    return _analysis.CollectLayoutInfo(expr)
+def collect_layout(expr, in_layouts = {}):
+    return _analysis.CollectLayoutInfo(expr)#, in_layouts)
 
 
 def get_total_mac_number(expr):

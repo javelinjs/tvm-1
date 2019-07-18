@@ -46,6 +46,29 @@ LayoutReporter LayoutReporterNode::make(Array<Expr> args, Array<RelayLayout> arg
   return LayoutReporter(n);
 }
 
+bool RelayLayout::Equals(const RelayLayout &rhs) const {
+  const auto* lhs_tensor_layout = as<TensorLayoutNode>();
+  const auto* rhs_tensor_layout = rhs.as<TensorLayoutNode>();
+  if (lhs_tensor_layout && rhs_tensor_layout) {
+    return lhs_tensor_layout->layout.Equals(rhs_tensor_layout->layout);
+  }
+  const auto* lhs_tuple_layout = as<TupleLayoutNode>();
+  const auto* rhs_tuple_layout = rhs.as<TupleLayoutNode>();
+  if (lhs_tuple_layout && rhs_tuple_layout) {
+    const auto lhs_fields = lhs_tuple_layout->fields;
+    const auto rhs_fields = rhs_tuple_layout->fields;
+    if (lhs_fields.size() == rhs_fields.size()) {
+      for (size_t i = 0; i < lhs_fields.size(); ++i) {
+        if (!lhs_fields[i].Equals(rhs_fields[i])) {
+          return false;
+        }
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
 void LayoutReporterNode::Assign(size_t index, const RelayLayout& layout) {
   CHECK_LT(index, this->args.size()) << "Index " << index << " out of bound. Size =  "
                                      << this->args.size();
