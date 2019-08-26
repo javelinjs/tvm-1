@@ -33,6 +33,11 @@ from . import parser
 from . import debug
 from . import param_dict
 from . import feature
+from .backend import vm
+from .backend import profiler_vm
+from .backend import serializer
+from .backend import deserializer
+from .backend import vmobj
 
 # Root operators
 from .op import Op
@@ -49,6 +54,9 @@ from . import frontend
 from . import backend
 from . import quantize
 
+# Dialects
+from . import qnn
+
 from .scope_builder import ScopeBuilder
 
 # Span
@@ -63,6 +71,7 @@ TupleType = ty.TupleType
 TensorType = ty.TensorType
 Kind = ty.Kind
 TypeVar = ty.TypeVar
+ShapeVar = ty.ShapeVar
 TypeConstraint = ty.TypeConstraint
 FuncType = ty.FuncType
 TypeRelation = ty.TypeRelation
@@ -71,6 +80,7 @@ scalar_type = ty.scalar_type
 RefType = ty.RefType
 GlobalTypeVar = ty.GlobalTypeVar
 TypeCall = ty.TypeCall
+Any = ty.Any
 
 # Expr
 Expr = expr.Expr

@@ -18,7 +18,6 @@
  */
 
 /*!
- *  Copyright (c) 2017 by Contributors
  * \file vectorize_loop.cc
  */
 // Loop vectorizer as in Halide pipeline.
@@ -150,6 +149,12 @@ class Vectorizer : public IRMutator {
     return BinaryVec(op, e);
   }
   Expr Mutate_(const Mod* op, const Expr &e) final {
+    return BinaryVec(op, e);
+  }
+  Expr Mutate_(const FloorDiv* op, const Expr &e) final {
+    return BinaryVec(op, e);
+  }
+  Expr Mutate_(const FloorMod* op, const Expr &e) final {
     return BinaryVec(op, e);
   }
   Expr Mutate_(const Min* op, const Expr &e) final {
@@ -486,13 +491,13 @@ class Vectorizer : public IRMutator {
         const Ramp* a_ramp = a.as<Ramp>();
         if (a.type().lanes() == 1 && b_ramp) {
           return Ramp::make(
-              arith::ComputeExpr<T>(a, b_ramp->base),
-              arith::ComputeExpr<T>(make_zero(b_ramp->stride.type()), b_ramp->stride),
+              arith::Compute<T>(a, b_ramp->base),
+              arith::Compute<T>(make_zero(b_ramp->stride.type()), b_ramp->stride),
               b_ramp->lanes);
         }
         if (b.type().lanes() == 1 && a_ramp) {
           return Ramp::make(
-              arith::ComputeExpr<T>(a_ramp->base, b), a_ramp->stride, a_ramp->lanes);
+              arith::Compute<T>(a_ramp->base, b), a_ramp->stride, a_ramp->lanes);
         }
       }
       return T::make(BroadcastTo(a, lanes), BroadcastTo(b, lanes));

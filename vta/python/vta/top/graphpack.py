@@ -26,7 +26,7 @@ def run_opt_pass(expr, opt_pass):
     assert isinstance(opt_pass, transform.Pass)
     mod = relay.Module.from_expr(expr)
     mod = opt_pass(mod)
-    entry = mod[mod.entry_func]
+    entry = mod["main"]
     return entry if isinstance(expr, relay.Function) else entry.body
 
 def _to_shape(shape):
@@ -129,6 +129,7 @@ class ExprPack(ExprMutator):
         super().__init__()
 
     def visit_call(self, call):
+        """ Visit the children. """
         # First visit the children.
         oshape = _get_shape(call)
         odtype = call.checked_type.dtype

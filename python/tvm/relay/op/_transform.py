@@ -40,6 +40,7 @@ _reg.register_schedule("reverse", schedule_injective)
 _reg.register_schedule("repeat", schedule_broadcast)
 _reg.register_schedule("tile", schedule_broadcast)
 _reg.register_schedule("cast", schedule_injective)
+_reg.register_schedule("reinterpret", schedule_injective)
 _reg.register_schedule("strided_slice", schedule_injective)
 _reg.register_schedule("slice_like", schedule_injective)
 _reg.register_schedule("split", schedule_injective)
@@ -51,6 +52,7 @@ _reg.register_schedule("concatenate", schedule_concatenate)
 _reg.register_schedule("_contrib_reverse_reshape", schedule_injective)
 _reg.register_schedule("gather_nd", schedule_injective)
 _reg.register_schedule("sequence_mask", schedule_injective)
+_reg.register_schedule("one_hot", schedule_injective)
 
 
 # layout_transform

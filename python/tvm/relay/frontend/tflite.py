@@ -79,7 +79,10 @@ class OperatorConverter(object):
             'REDUCE_PROD': self._convert_reduce_prod,
             'FULLY_CONNECTED': self.convert_fully_connected,
             'PAD': self.convert_pad,
+            'PACK': self.convert_pack,
             'LOGISTIC': self.convert_logistic,
+            'SPLIT': self.convert_split,
+            'TRANSPOSE': self.convert_transpose
         }
 
     def check_unsupported_ops(self):
@@ -259,7 +262,7 @@ class OperatorConverter(object):
         # Options - align_corners (bool)
         resize_options = None
         align_corners = False
-        if method == "BILINEAR":
+        if method == "bilinear":
             assert op.BuiltinOptionsType() == BuiltinOptions.ResizeBilinearOptions
             resize_options = ResizeBilinearOptions()
         elif tflite_ver >= 1130:
@@ -277,11 +280,11 @@ class OperatorConverter(object):
 
     def convert_resize_bilinear(self, op):
         """Convert TFLite RESIZE_BILINEAR"""
-        return self._convert_resize("BILINEAR", op)
+        return self._convert_resize("bilinear", op)
 
     def convert_resize_nearest_neighbor(self, op):
         """Convert TFLite RESIZE_NEAREST_NEIGHBOR"""
-        return self._convert_resize("NEAREST_NEIGHBOR", op)
+        return self._convert_resize("nearest_neighbor", op)
 
     def convert_logistic(self, op):
         """Convert TFLite LOGISTIC"""
@@ -681,7 +684,7 @@ class OperatorConverter(object):
                                                           (pad_left, pad_right),
                                                           (0, 0)))
         else:
-            raise tvm.error.OpAttributeUnimplemented(
+            raise tvm.error.OpAttributeUnImplemented(
                 'Padding format {} is not supported for operator Conv.'.format(padding))
 
         out = _op.nn.conv2d(data=in_expr, weight=weight_expr, **params)
@@ -701,6 +704,68 @@ class OperatorConverter(object):
         # If we have fused activations
         if fused_activation_fn != ActivationFunctionType.NONE:
             out = self.convert_fused_activation_function(out, fused_activation_fn)
+
+        return out
+
+    def convert_split(self, op):
+        """split implementation."""
+        try:
+            from tflite.BuiltinOptions import BuiltinOptions
+            from tflite.Operator import Operator
+            from tflite.SplitOptions import SplitOptions
+        except ImportError:
+            raise ImportError("The tflite package must be installed")
+
+        assert isinstance(op, Operator)
+        input_tensors = self.get_input_tensors(op)
+
+        assert len(input_tensors) == 2, "input tensors length should be == 2"
+
+        axis_tensor = input_tensors[0]
+        split_axis = self.get_tensor_value(axis_tensor)
+        input_tensor = input_tensors[1]
+        input_tensor_idx = input_tensor.tensor_idx
+
+        assert op.BuiltinOptionsType() == BuiltinOptions.SplitOptions
+        op_options = op.BuiltinOptions()
+        split_options = SplitOptions()
+        split_options.Init(op_options.Bytes, op_options.Pos)
+        num_splits = split_options.NumSplits()
+
+        in_expr = self.get_expr(input_tensor_idx)
+        out = _op.split(in_expr, num_splits, axis=int(split_axis))
+        # Relay does not like a TupleWrapper of 1 element, further this
+        # only shows up with tf1.13 if we use a split with num_splits==1.
+        # In tf 1.14 this doesn't appear as it is automatically a reshape
+        # operation.
+        if isinstance(out, _expr.TupleWrapper):
+            if out.size == 1:
+                out = out[0]
+
+        return out
+
+    def convert_transpose(self, op):
+        """transpose implementation."""
+        try:
+            from tflite.Operator import Operator
+        except ImportError:
+            raise ImportError("The tflite package must be installed")
+
+        assert isinstance(op, Operator)
+        input_tensors = self.get_input_tensors(op)
+        assert len(input_tensors) == 2, "input tensors length should be 2"
+        input_tensor = input_tensors[0]
+        input_tensor_idx = input_tensor.tensor_idx
+
+        in_expr = self.get_expr(input_tensor_idx)
+
+        # axis
+        in_axis = tuple(self.get_tensor_value(input_tensors[1]))
+
+        if not in_axis:
+            out = _op.transpose(in_expr)
+        else:
+            out = _op.transpose(in_expr, in_axis)
 
         return out
 
@@ -747,7 +812,7 @@ class OperatorConverter(object):
             pad_left, pad_right = get_pad_value(input_w, filter_w, stride_w)
             params['padding'] = [pad_top, pad_left, pad_bottom, pad_right]
         else:
-            raise tvm.error.OpAttributeUnimplemented(
+            raise tvm.error.OpAttributeUnImplemented(
                 'Padding format {} for operator Pool2D is not supported.'.format(padding))
 
         if pool_type == "average":
@@ -787,6 +852,33 @@ class OperatorConverter(object):
 
         # Use default pad_value 0 because TFLite does not support constant_values parameter
         out = _op.nn.pad(in_expr, paddings)
+        return out
+
+    def convert_pack(self, op):
+        """Convert TFLite pack"""
+        try:
+            from tflite.BuiltinOptions import BuiltinOptions
+            from tflite.Operator import Operator
+            from tflite.PackOptions import PackOptions
+        except ImportError:
+            raise ImportError("The tflite package must be installed")
+
+        assert isinstance(op, Operator)
+        input_tensors = self.get_input_tensors(op)
+        assert len(input_tensors) >= 1, "input tensors should greater than 1"
+        in_exprs = [self.get_expr(input_tensor.tensor_idx) for input_tensor in input_tensors]
+
+        output_tensors = self.get_output_tensors(op)
+        assert len(output_tensors) == 1, "output tensors should be 1"
+
+        assert op.BuiltinOptionsType() == BuiltinOptions.PackOptions
+        op_options = op.BuiltinOptions()
+        pack_options = PackOptions()
+        pack_options.Init(op_options.Bytes, op_options.Pos)
+        pack_axis = pack_options.Axis()
+
+        in_exprs_reshaped = [_op.expand_dims(i, axis=pack_axis, num_newaxis=1) for i in in_exprs]
+        out = _op.concatenate(in_exprs_reshaped, pack_axis)
         return out
 
     def get_expr(self, input_tensor_idx):

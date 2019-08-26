@@ -24,7 +24,7 @@ import topi.testing
 def run_infer_type(expr):
     mod = relay.Module.from_expr(expr)
     mod = transform.InferType()(mod)
-    entry = mod[mod.entry_func]
+    entry = mod["main"]
     return entry if isinstance(expr, relay.Function) else entry.body
 
 def sigmoid(x):
@@ -71,7 +71,9 @@ def test_unary_op():
                         (tvm.relay.rsqrt, rsqrt),
                         (tvm.relay.sigmoid, sigmoid),
                         (tvm.relay.tanh, np.tanh),
-                        (relay.nn.relu, relu)]:
+                        (relay.nn.relu, relu),
+                        (tvm.relay.cos, np.cos),
+                        (tvm.relay.sin, np.sin)]:
         check_single_op(opfunc, ref)
 
 

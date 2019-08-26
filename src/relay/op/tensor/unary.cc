@@ -53,6 +53,28 @@ RELAY_REGISTER_UNARY_OP("log")
 .set_attr<FTVMCompute>("FTVMCompute", RELAY_UNARY_COMPUTE(topi::log));
 
 
+RELAY_REGISTER_UNARY_OP("cos")
+.describe(R"code(Returns the cos of input array, computed element-wise.
+
+.. math::
+   Y = cos(X)
+
+)code" TVM_ADD_FILELINE)
+.set_support_level(1)
+.set_attr<FTVMCompute>("FTVMCompute", RELAY_UNARY_COMPUTE(topi::cos));
+
+
+RELAY_REGISTER_UNARY_OP("sin")
+.describe(R"code(Returns the sin of input array, computed element-wise.
+
+.. math::
+   Y = sin(X)
+
+)code" TVM_ADD_FILELINE)
+.set_support_level(1)
+.set_attr<FTVMCompute>("FTVMCompute", RELAY_UNARY_COMPUTE(topi::sin));
+
+
 RELAY_REGISTER_UNARY_OP("exp")
 .describe(R"code(Returns the exp input array, computed element-wise.
 
@@ -278,6 +300,55 @@ RELAY_REGISTER_OP("shape_of")
                                ElemwiseArbitraryLayout)
 .set_support_level(10)
 .set_attr<FTVMCompute>("FTVMCompute", ShapeOfCompute);
+
+
+TVM_REGISTER_NODE_TYPE(NdarraySizeAttrs);
+
+bool NdarraySizeRel(const Array<Type>& types,
+             int num_inputs,
+             const Attrs& attrs,
+             const TypeReporter& reporter) {
+  CHECK_EQ(num_inputs, 1);
+  auto tt = types[0].as<TensorTypeNode>();
+  CHECK(tt != nullptr);
+  const auto* param = attrs.as<NdarraySizeAttrs>();
+  CHECK(param != nullptr);
+  reporter->Assign(types[1], TensorTypeNode::make({1}, param->dtype));
+  return true;
+}
+
+Array<Tensor> NdarraySizeCompute(const Attrs& attrs,
+                          const Array<Tensor>& inputs,
+                          const Type& out_type,
+                          const Target& target) {
+  CHECK_EQ(inputs.size(), 1);
+  const auto* param = attrs.as<NdarraySizeAttrs>();
+  CHECK(param != nullptr);
+  return Array<Tensor>{topi::ndarray_size(inputs[0], param->dtype)};
+}
+
+TVM_REGISTER_API("relay.op.contrib._make.ndarray_size")
+.set_body_typed<Expr(Expr, DataType)>([](Expr data, DataType dtype) {
+  auto attrs = make_node<NdarraySizeAttrs>();
+  attrs->dtype = dtype;
+  static const Op& op = Op::Get("contrib.ndarray_size");
+  return CallNode::make(op, {data}, Attrs(attrs), {});
+});
+
+RELAY_REGISTER_OP("contrib.ndarray_size")
+.describe(R"code(Returns a tensor representing the number of elements of input tensor.
+
+)code" TVM_ADD_FILELINE)
+.set_num_inputs(1)
+.set_attrs_type_key("relay.attrs.NdarraySizeAttrs")
+.add_argument("data", "Tensor", "The input tensor.")
+.add_type_rel("NdarraySize", NdarraySizeRel)
+.set_attr<TOpIsStateful>("TOpIsStateful", false)
+.set_attr<TOpPattern>("TOpPattern", kInjective)
+.set_attr<FInferCorrectLayout>("FInferCorrectLayout",
+ElemwiseArbitraryLayout)
+.set_support_level(10)
+.set_attr<FTVMCompute>("FTVMCompute", NdarraySizeCompute);
 
 }  // namespace relay
 }  // namespace tvm

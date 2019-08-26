@@ -35,7 +35,8 @@
 #include "topi/tags.h"
 #include "topi/detail/ravel_unravel.h"
 #include "topi/detail/constant_utils.h"
-#include "tvm/tvm.h"
+#include "tvm/operation.h"
+#include "tvm/expr_operator.h"
 #include "tvm/data_layout.h"
 
 namespace topi {
@@ -209,7 +210,8 @@ inline Tensor reshape(const Tensor& x,
   auto x_shape = x->shape;
   return compute(
     newshape, [&](const Array<Var>& indices) {
-      return x(UnravelIndex(RavelIndex(indices, newshape), x_shape));
+      return x(UnravelIndex(RavelIndex(Array<Expr>{indices.begin(), indices.end()}, newshape),
+                            x_shape));
     }, name, tag);
 }
 
@@ -688,7 +690,7 @@ inline Tensor sequence_mask(const Tensor& data,
         auto bid = out_index[1 - axis];
         len_index.push_back(bid);
         Expr ret = tvm::if_then_else(tvm::cast(valid_length->dtype, tid) >= valid_length(len_index),
-                                     tvm::cast(data->dtype, Expr(mask_value)), data(out_index));
+                                     tvm::make_const(data->dtype, mask_value), data(out_index));
         return ret;
       }, name, tag);
   return out;
@@ -805,7 +807,7 @@ inline Tensor where(const Tensor& condition,
                     const Tensor& x,
                     const Tensor& y,
                     std::string name = "T_where",
-                    std::string tag = kInjective) {
+                    std::string tag = kBroadcast) {
   CHECK_EQ(x->shape.size(), y->shape.size())
     << "x and y must have the same shape.Got different number of dimension: "
     << x->shape.size() << " vs " << y->shape.size();
@@ -1219,6 +1221,79 @@ inline Tensor shape(const Tensor& src,
       ret = tvm::if_then_else(idx == i, src->shape[i], ret);
     }
     return tvm::cast(dtype, ret);
+  }, name, tag);
+}
+
+/*!
+ * \brief Get the size of input tensor.
+ * \param src the input tensor.
+ * \param dtype the type of the elements in the tensor.
+ * \param name output tensor name.
+ * \param tag output tensor tag.
+ * \return Tensor of input shape.
+ */
+inline Tensor ndarray_size(const Tensor& src,
+                           const Type& dtype,
+                           const std::string& name = "ndarray_size",
+                           const std::string& tag = kInjective) {
+  int ndim = static_cast<int>(src->shape.size());
+  Array<Expr> out_ndarray_size = {1};
+  return compute(out_ndarray_size, [&](const Array<Var>& indices) {
+    Expr ret = 1;
+    for (int i = 0; i < ndim; ++i) {
+      ret *= src->shape[i];
+    }
+    return tvm::cast(dtype, ret);
+  }, name, tag);
+}
+
+/*!
+ * \brief Returns a one-hot tensor where the locations repsented by indices take value on_value, 
+    other locations take value off_value.
+ * \param indices locations to set to on_value.
+ * \param on_value value that locations represented by indices take on.
+ * \param off_value value that other locations take on.
+ * \param depth depth of the one-hot dimension.
+ * \param axis axis to fill.
+ * \param dtype data type of the output tensor.
+ * \param name output tensor name.
+ * \param tag output tensor tag.
+ * \return one-hot tensor.
+ */
+inline Tensor one_hot(const Tensor& indices,
+                      const Expr on_value,
+                      const Expr off_value,
+                      int depth,
+                      int axis,
+                      const Type& dtype,
+                      const std::string name = "T_one_hot",
+                      const std::string tag = kInjective) {
+  Array<Expr> oshape;
+  int ndim = indices->shape.size() + 1;
+  int indices_index = 0;
+  int true_axis = (axis == -1) ? indices->shape.size() : axis;
+  for (int i = 0; i < ndim; i++) {
+    if (i == true_axis) {
+      oshape.push_back(Integer(depth));
+    } else {
+      oshape.push_back(indices->shape[indices_index++]);
+    }
+  }
+
+  Expr on_value_cast = cast(dtype, on_value);
+  Expr off_value_cast = cast(dtype, off_value);
+  return compute(oshape, [&](const Array<Var>& iter_vars) {
+    Array<Var> indices_indices;
+    for (size_t i = 0; i < iter_vars.size(); i++) {
+      if (static_cast<int>(i) == true_axis) {
+        continue;
+      }
+
+      indices_indices.push_back(iter_vars[i]);
+    }
+
+    auto idx = iter_vars[true_axis];
+    return ir::Select::make(indices(indices_indices) == idx, on_value_cast, off_value_cast);
   }, name, tag);
 }
 

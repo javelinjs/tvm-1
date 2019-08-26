@@ -41,11 +41,13 @@ We do encourage everyone to work anything they are interested in.
 
 - [Aditya Atluri](https://github.com/adityaatluri): @adityaatluri - rocm
 - [Tianqi Chen](https://github.com/tqchen) (PMC): @tqchen - topi, compiler, relay, docs
+- [Zhi Chen](https://github.com/zhiics): @zhiics - relay, quantization, pass manager
 - [Yuwei Hu](https://github.com/Huyuwei): @Huyuwei - topi, frontends
 - [Nick Hynes](https://github.com/nhynes): @nhynes: - sgx, rust
 - [Ziheng Jiang](https://github.com/ZihengJiang) (PMC): @ZihengJiang - relay, compiler
 - [Wuwei Lin](https://github.com/vinx13): @vinx13 - relay, topi
 - [Yizhi Liu](https://github.com/yzhliu) (PMC): @yzhliu - jvm, topi, relay
+- [Hao Lu](https://github.com/hlu1): @hlu1 - nnpack, frontends
 - [Masahiro Masuda](https://github.com/masahi): @masahi - topi, relay
 - [Thierry Moreau](https://github.com/tmoreau89) (PMC): @tmoreau89 - vta
 - [Kazutaka Morita](https://github.com/kazum): @kazum - frontends, opencl
@@ -76,7 +78,9 @@ We do encourage everyone to work anything they are interested in.
 - [Zhi Chen](https://github.com/zhiics): @zhiics
 - [Xiaoqiang Dan](https://github.com/xqdan): @xqdan
 - [Ziheng Jiang](https://github.com/ZihengJiang): @ZihengJiang
+- [Marisa Kirisame](https://github.com/MarisaKirisame): @MarisaKirisame
 - [Wuwei Lin](https://github.com/vinx13): @vinx13
+- [Steven Lyubomirsky](https://github.com/slyubomirsky): @slyubomirsky
 - [Masahiro Masuda](https://github.com/masahi): @masahi
 - [Sergey Mironov](https://github.com/grwlf): @grwlf
 - [Thierry Moreau](https://github.com/tmoreau89): @tmoreau89
@@ -108,3 +112,5 @@ We do encourage everyone to work anything they are interested in.
 - [Haolong Zhang](https://github.com/haolongzhangm)
 - [Cody Hao Yu](https://github.com/comaniac)
 - [Chris Nuernberger](https://github.com/cnuernber)
+- [Shoubhik Bhattacharya](https://github.com/shoubhik)
+- [Neo Chien](https://github.com/cchung100m)

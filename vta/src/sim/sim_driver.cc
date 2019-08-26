@@ -6,9 +6,9 @@
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- * 
+ *
  *   http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -553,7 +553,7 @@ class Device {
           src_index += y * op->src_factor_out + x * op->src_factor_in;
           BitPacker<VTA_ACC_WIDTH> dst(acc_.BeginPtr(dst_index));
           BitPacker<VTA_ACC_WIDTH> src(acc_.BeginPtr(src_index));
-          for (int k = 0; k < VTA_BLOCK_OUT; ++k) {
+          for (int k = 0; k < VTA_BATCH * VTA_BLOCK_OUT; ++k) {
             if (use_imm) {
               dst.SetSigned(k, func(dst.GetSigned(k), op->imm));
             } else {
@@ -607,10 +607,18 @@ vta_phy_addr_t VTAMemGetPhyAddr(void* buf) {
   return vta::sim::DRAM::Global()->GetPhyAddr(buf);
 }
 
-void VTAFlushCache(vta_phy_addr_t buf, int size) {
+void VTAMemCopyFromHost(void* dst, const void* src, size_t size) {
+  memcpy(dst, src, size);
 }
 
-void VTAInvalidateCache(vta_phy_addr_t buf, int size) {
+void VTAMemCopyToHost(void* dst, const void* src, size_t size) {
+  memcpy(dst, src, size);
+}
+
+void VTAFlushCache(void* vir_addr, vta_phy_addr_t phy_addr, int size) {
+}
+
+void VTAInvalidateCache(void* vir_addr, vta_phy_addr_t phy_addr, int size) {
 }
 
 VTADeviceHandle VTADeviceAlloc() {

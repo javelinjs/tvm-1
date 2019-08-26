@@ -18,7 +18,7 @@
  */
 
 /*!
- * \file nnvm/compiler/op_attr_types.h
+ * \file tvm/relay/op_attr_types.h
  * \brief The Expr and related elements in DataFlow construction.
  */
 #ifndef TVM_RELAY_OP_ATTR_TYPES_H_
@@ -128,6 +128,20 @@ using FTVMAlterOpLayout = runtime::TypedPackedFunc<
        const Array<Tensor>& tinfos)>;
 
 /*!
+ * \brief Legalizes an expression with another expression. This function will be
+ *  invoked in Legalize pass. It is a target-dependent pass.
+ * \param attrs The attribute of the original node.
+ * \param inputs The input symbols of the original node.
+ * \param tinfos An array of placeholders, use for getting the inferred shape
+ *               and dtype of the inputs.
+ * \return new_expr The modified expression.
+ */
+using FTVMLegalize = runtime::TypedPackedFunc<
+  Expr(const Attrs& attrs,
+       const Array<Expr>& args,
+       const Array<tvm::relay::Type>& arg_types)>;
+
+/*!
  * \brief Forward rewriting rule for a specific op.
  *
  * \param ref_call The reference old call type to be rewritten.
@@ -157,6 +171,22 @@ using FForwardRewrite = runtime::TypedPackedFunc<
  */
 using FPrimalGradient = runtime::TypedPackedFunc<tvm::Array<Expr>(const Expr& orig_call,
                                                                   const Expr& output_grad)>;
+
+/*!
+ * \brief The codegeneration strategy for dynamic dimensions.
+ */
+enum AnyCodegenStrategy {
+  /*! \brief The default strategy of using completely variable dimensions. */
+  kVariableDimensions
+};
+
+/* \brief A runtime representation of shape. */
+using Shape = Array<IndexExpr>;
+
+using FShapeFunc = runtime::TypedPackedFunc<
+  Array<Tensor>(const Attrs& attrs,
+                const Array<Tensor>& inputs,
+                const Array<Shape>& out_shapes)>;
 
 }  // namespace relay
 }  // namespace tvm

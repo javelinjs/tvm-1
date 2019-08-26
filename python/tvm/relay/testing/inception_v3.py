@@ -38,7 +38,8 @@ def Conv(data, num_filter, kernel=(1, 1), stride=(1, 1), pad=(0, 0), name=None, 
         padding=pad,
         name='%s%s_conv1' % (name, suffix))
 
-    bn = layers.batch_norm_infer(data=conv, epsilon=2e-5, name='%s%s_bn' % (name, suffix))
+    bn = layers.batch_norm_infer(data=conv, epsilon=2e-5, scale=False,
+                                 name='%s%s_bn' % (name, suffix))
     act = relay.nn.relu(data=bn)
     return act
 
@@ -289,8 +290,8 @@ def get_workload(batch_size=1, num_classes=1000,
 
     Returns
     -------
-    net : nnvm.Symbol
-        The computational graph
+    mod : tvm.relay.Module
+        The relay module that contains an Inception V3 network.
 
     params : dict of str to NDArray
         The parameters.

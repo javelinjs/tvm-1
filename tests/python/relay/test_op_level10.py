@@ -28,7 +28,7 @@ import topi.testing
 def run_infer_type(expr):
     mod = relay.Module.from_expr(expr)
     mod = transform.InferType()(mod)
-    entry = mod[mod.entry_func]
+    entry = mod["main"]
     return entry if isinstance(expr, relay.Function) else entry.body
 
 def test_collapse_sum_like():
@@ -215,6 +215,23 @@ def test_shape_of():
             tvm.testing.assert_allclose(op_res.asnumpy(),
                                         np.array(shape).astype('int32'))
 
+def test_ndarray_size():
+    def verify_ndarray_size(shape):
+        x = relay.var("x", shape=shape)
+        func = relay.Function([x], relay.op.contrib.ndarray_size(x))
+        func = run_infer_type(func)
+
+        x_data = np.random.uniform(size=shape).astype("float32")
+        ref_res = np.size(x_data)
+        for target, ctx in ctx_list():
+            for kind in ["graph", "debug"]:
+                intrp = relay.create_executor(kind, ctx=ctx, target=target)
+                op_res = intrp.evaluate(func)(x_data)
+                tvm.testing.assert_allclose(op_res.asnumpy(),
+                                            ref_res)
+    verify_ndarray_size((2, 3, 5))
+    verify_ndarray_size((2, 3, 5, 7))
+
 def verify_adaptive_pool2d(dshape, out_size, pool_type, layout="NCHW", dtype="float32"):
     def start_index(index, odim, idim):
         return int(np.floor(index * idim / odim))
@@ -279,6 +296,45 @@ def test_sequence_mask():
     _verify((2, 3, 5, 3), 0.0, 0, 'float32', 'int64')
     _verify((5, 8, 3), 0.1, 1, 'float64', 'float32')
 
+def test_one_hot():
+    def _get_oshape(indices_shape, depth, axis):
+        oshape = []
+        true_axis = len(indices_shape) if axis == -1 else axis
+        ndim = len(indices_shape) + 1
+        indices_index = 0
+        for i in range(0, ndim):
+            if i == true_axis:
+                oshape.append(depth)
+            else:
+                oshape.append(indices_shape[indices_index])
+                indices_index += 1
+        
+        return oshape
+
+    def _verify(indices_shape, depth, on_value, off_value, axis, dtype):
+        indices = relay.var("indices", relay.TensorType(indices_shape, "int32"))
+        on_value_const = relay.const(on_value)
+        off_value_const = relay.const(off_value)
+        out = relay.one_hot(indices, on_value_const, off_value_const, depth, axis, dtype)
+        checked = run_infer_type(out)
+        assert checked.checked_type == relay.ty.TensorType(_get_oshape(indices_shape, depth, axis), dtype)
+        func = relay.Function([indices], out)
+        indices_np = np.random.randint(0, depth, size=indices_shape).astype("int32")
+        out_np = topi.testing.one_hot(indices_np, on_value, off_value, depth, axis, dtype)
+
+        for target, ctx in ctx_list():
+            for kind in ["graph", "debug"]:
+                intrp = relay.create_executor(kind, ctx=ctx, target=target)
+                out_relay = intrp.evaluate(func)(indices_np)
+                tvm.testing.assert_allclose(out_relay.asnumpy(), out_np)
+    
+    _verify((3,), 3, 1, 0, -1, "int32")
+    _verify((3,), 3, 1.0, 0.0, -1, "float32")
+    _verify((2, 2), 5, 2, -2, 0, "int32")
+    _verify((2, 2), 5, 0.5, -0.5, 1, "float32")
+    _verify((3, 2, 4, 5), 6, 1, 0, 1, "int32")
+    _verify((3, 2, 4, 5), 6, 1.0, 0.0, 0, "float32")
+
 if __name__ == "__main__":
     test_adaptive_pool2d()
     test_collapse_sum_like()
@@ -288,3 +344,6 @@ if __name__ == "__main__":
     test_batch_matmul()
     test_shape_of()
     test_sequence_mask()
+    test_ndarray_size()
+    test_one_hot()
+

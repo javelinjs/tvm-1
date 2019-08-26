@@ -73,7 +73,8 @@ reg.register_pattern("nn.dense", reg.OpPattern.OUT_ELEMWISE_FUSABLE)
 @reg.register_compute("nn.batch_matmul")
 def compute_batch_matmul(attrs, inputs, out_type, target):
     """Compute definition of batch_matmul"""
-    return [topi.nn.batch_matmul(inputs[0], inputs[1])]
+    with target:
+        return [topi.nn.batch_matmul(inputs[0], inputs[1])]
 
 
 @reg.register_schedule("nn.batch_matmul")
@@ -85,6 +86,33 @@ def schedule_batch_matmul(attrs, outputs, target):
 
 reg.register_pattern("nn.batch_matmul", reg.OpPattern.OUT_ELEMWISE_FUSABLE)
 
+# sparse_dense
+@reg.register_compute("nn.sparse_dense")
+def compute_sparse_dense(attrs, inputs, out_type, target):
+    """Compute definition of sparse_dense"""
+    return [topi.nn.sparse_dense(inputs[0], inputs[1], inputs[2], inputs[3])]
+
+@reg.register_schedule("nn.sparse_dense")
+def schedule_sparse_dense(attrs, outputs, target):
+    """Schedule definition of batch_matmul"""
+    with target:
+        return topi.generic.schedule_sparse_dense(outputs)
+
+reg.register_pattern("nn.sparse_dense", reg.OpPattern.OUT_ELEMWISE_FUSABLE)
+
+# sparse_transpose
+@reg.register_compute("nn.sparse_transpose")
+def compute_sparse_transpose(attrs, inputs, out_type, target):
+    """Compute definition of sparse_transpose"""
+    return topi.nn.sparse_transpose(inputs[0], inputs[1], inputs[2])
+
+@reg.register_schedule("nn.sparse_transpose")
+def schedule_sparse_transpose(attrs, outputs, target):
+    """Schedule definition of batch_matmul"""
+    with target:
+        return topi.generic.schedule_sparse_transpose(outputs)
+
+reg.register_pattern("nn.sparse_transpose", reg.OpPattern.OUT_ELEMWISE_FUSABLE)
 
 # conv2d
 def _find_conv2d_op(op):
@@ -177,6 +205,25 @@ def alter_op_layout_conv2d(attrs, inputs, tinfos):
     from ... import op
     return topi.nn.conv2d_alter_layout(attrs, inputs, tinfos, op)
 
+@reg.register_legalize("nn.conv2d")
+def legalize_conv2d(attrs, inputs, types):
+    """Legalize conv2d op.
+
+    Parameters
+    ----------
+    attrs : tvm.attrs.Attrs
+        Attributes of current convolution
+    inputs : list of tvm.relay.Expr
+        The args of the Relay expr to be legalized
+    types : list of types
+        List of input and output types
+
+    Returns
+    -------
+    result : tvm.relay.Expr
+        The legalized expr
+    """
+    return topi.nn.conv2d_legalize(attrs, inputs, types)
 
 reg.register_pattern("nn.conv2d", OpPattern.OUT_ELEMWISE_FUSABLE)
 
@@ -240,6 +287,28 @@ def schedule_avg_pool2d(attrs, outs, target):
 
 
 reg.register_pattern("nn.avg_pool2d", OpPattern.OUT_ELEMWISE_FUSABLE)
+
+
+# max_pool2d_grad
+@reg.register_schedule("nn.max_pool2d_grad")
+def schedule_max_pool2d_grad(attrs, outs, target):
+    """Schedule definition of max_pool2d_grad"""
+    with target:
+        return topi.generic.schedule_pool_grad(outs)
+
+
+reg.register_pattern("nn.max_pool2d_grad", OpPattern.OUT_ELEMWISE_FUSABLE)
+
+
+# avg_pool2d_grad
+@reg.register_schedule("nn.avg_pool2d_grad")
+def schedule_avg_pool2d_grad(attrs, outs, target):
+    """Schedule definition of avg_pool2d_grad"""
+    with target:
+        return topi.generic.schedule_pool_grad(outs)
+
+
+reg.register_pattern("nn.avg_pool2d_grad", OpPattern.OUT_ELEMWISE_FUSABLE)
 
 
 # global_max_pool2d
@@ -321,9 +390,26 @@ def schedule_upsampling(_, outs, target):
     with target:
         return topi.generic.schedule_injective(outs)
 
+@reg.register_compute("nn.upsampling")
+def compute_upsampling(attrs, inputs, out_dtype, target):
+    scale = attrs.scale
+    layout = attrs.layout
+    method = attrs.method
+    align_corners = attrs.align_corners
+    return [topi.nn.upsampling(inputs[0], scale, layout, method, align_corners)]
 
 # pad
 reg.register_schedule("nn.pad", schedule_broadcast)
+
+# mirror_pad
+reg.register_schedule("nn.mirror_pad", schedule_broadcast)
+
+@reg.register_compute("nn.mirror_pad")
+def compute_mirror_pad(attrs, inputs, out_dtype, target):
+    pad_before, pad_after = list(zip(*attrs.pad_width))
+    mode = attrs.mode
+    out = topi.nn.mirror_pad(inputs[0], pad_before=pad_before, pad_after=pad_after, mode=mode)
+    return [out]
 
 # winograd related operators
 @reg.register_compute("nn.contrib_conv2d_winograd_without_weight_transform")

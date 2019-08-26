@@ -26,7 +26,7 @@ from tvm.relay.testing import ctx_list
 def run_infer_type(expr):
     mod = relay.Module.from_expr(expr)
     mod = transform.InferType()(mod)
-    entry = mod[mod.entry_func]
+    entry = mod["main"]
     return entry if isinstance(expr, relay.Function) else entry.body
 
 def test_zeros_ones():
@@ -75,6 +75,7 @@ def test_cast():
     assert "dtype=" in yy.astext()
     assert yy.checked_type == relay.TensorType((8, 9, 4), "int32")
 
+
 def test_clip():
     a = relay.var("a", relay.TensorType((10, 4), "float32"))
     y = relay.clip(a, 1., 4.)
@@ -86,6 +87,69 @@ def test_clip():
     op_res = intrp.evaluate(y, { a: relay.const(data) })
     ref_res = np.clip(data, 1., 4.)
     np.testing.assert_allclose(op_res.asnumpy(), ref_res, rtol=0.01)
+
+
+def test_reinterpret():
+    a = relay.var("a", relay.TensorType((1000, 4), "float32"))
+    y = relay.reinterpret(a, "int32")
+    yy = run_infer_type(y)
+    assert yy.checked_type == relay.TensorType((1000, 4), "int32")
+
+    data = np.random.randn(1000, 4).astype('float32') * 1000
+    intrp = create_executor()
+    op_res = intrp.evaluate(y, {a: relay.const(data)})
+    ref_res = data.view("int32")
+    np.testing.assert_equal(op_res.asnumpy(), ref_res)
+
+
+def test_approximate_transcendental():
+    def C(x):
+        return relay.expr.const(x, "float32")
+
+    def approx_exp(x):
+        # An approximation derived from Opus,
+        # https://github.com/xiph/opus/blob/c1c247/celt/mathops.h#L147-L165
+        x = relay.minimum(relay.maximum(x, C(-88.0)), C(88.0))
+        x = C(127.0) + x * C(1.44269504)
+        xf = relay.floor(x)
+        i = relay.cast(xf, "int32")
+        x = x - xf
+        Y = C(0.99992522) + x * (C(0.69583354) + x * (C(0.22606716) + x * C(0.078024523)))
+        exponent = relay.left_shift(i, relay.expr.const(23, "int32"))
+        exponent = relay.reinterpret(exponent, "float32")
+        return exponent * Y
+
+    def approximate_sigmoid(x):
+        y = approx_exp(x)
+        return y / (y + C(1.0))
+
+    def approximate_tanh(x):
+        x = x * C(2.0)
+        y = approx_exp(x)
+        return (y - C(1.0)) / (y + C(1.0))
+
+    a = relay.var("a", relay.TensorType((1000,), "float32"))
+    y = approximate_sigmoid(a)
+    yy = run_infer_type(y)
+    assert yy.checked_type == relay.TensorType((1000,), "float32")
+    data = np.linspace(-5, 5, 1000).astype("float32")
+    intrp = create_executor()
+    op_res = intrp.evaluate(y, {a: relay.const(data)})
+
+    def reference_sigmoid(x):
+        return np.exp(-np.logaddexp(0, -x))
+    np.testing.assert_allclose(op_res.asnumpy(), reference_sigmoid(data), atol=2e-5, rtol=1e-9)
+
+    y = approximate_tanh(a)
+    yy = run_infer_type(y)
+    assert yy.checked_type == relay.TensorType((1000,), "float32")
+    data = np.linspace(-5, 5, 1000).astype("float32")
+    intrp = create_executor()
+    op_res = intrp.evaluate(y, {a: relay.const(data)})
+
+    def reference_tanh(x):
+        return np.tanh(x)
+    np.testing.assert_allclose(op_res.asnumpy(), reference_tanh(data), atol=4e-5, rtol=1e-9)
 
 
 def test_squeeze():
@@ -493,17 +557,20 @@ def test_arange():
     def verify_arange(start, stop, step):
         dtype = "float32"
         if start is None and step is None:
-            x = relay.arange(stop)
-            ref_res = np.arange(stop)
+            x = relay.arange(relay.const(stop, dtype=dtype))
+            ref_res = np.arange(stop).astype(dtype)
         elif start is None:
-            x = relay.arange(stop, step=step)
-            ref_res = np.arange(stop, step=step)
+            x = relay.arange(relay.const(stop, dtype=dtype), step=relay.const(step, dtype=dtype))
+            ref_res = np.arange(stop, step=step).astype(dtype)
         elif step is None:
-            x = relay.arange(start, stop)
-            ref_res = np.arange(start, stop)
+            x = relay.arange(relay.const(start, dtype=dtype), relay.const(stop, dtype=dtype))
+            ref_res = np.arange(start, stop).astype(dtype)
         else:
-            x = relay.arange(start, stop, step)
-            ref_res = np.arange(start, stop, step)
+            x = relay.arange(
+                relay.const(start, dtype=dtype),
+                relay.const(stop, dtype=dtype),
+                relay.const(step, dtype=dtype))
+            ref_res = np.arange(start, stop, step).astype(dtype)
 
         func = relay.Function([], x)
         for target, ctx in ctx_list():
@@ -515,11 +582,13 @@ def test_arange():
     verify_arange(None, 20, 2)
     verify_arange(1, 20, None)
     verify_arange(1, 20, 2)
-    verify_arange(1, 20, 1.5)
+    # arange doesnt' support floating point right now, see type relation
+    # verify_arange(1, 20, 1.5)
     verify_arange(1, 20.5, None)
     verify_arange(1, 20, 3)
     verify_arange(20, 1, -1)
-    verify_arange(20, 1, -1.5)
+    # arange doesnt' support floating point right now, see type relation
+    # verify_arange(20, 1, -1.5)
 
 def test_tile():
     def verify_tile(dshape, reps):
@@ -613,9 +682,11 @@ def test_gather_nd():
                 tvm.testing.assert_allclose(op_res.asnumpy(), ref_res, rtol=1e-5)
     verify_gather_nd((2, 2), (2, 3), [[1, 1, 0], [0, 1, 0]])
     verify_gather_nd((2, 2, 2), (2, 2), [[0, 1], [1, 0]])
-
+    verify_gather_nd((3, 2, 2), (2, 2), [[0, 1], [1, 0]])
+    verify_gather_nd((3, 2), (2, 2, 3), [[[0, 1, 2], [2, 0, 1]], [[0, 0, 0], [1, 1, 1]]])
 
 if __name__ == "__main__":
+    test_arange()
     test_cast()
     test_zeros_ones()
     test_unary_identity()

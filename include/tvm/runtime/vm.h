@@ -36,6 +36,9 @@ namespace tvm {
 namespace runtime {
 namespace vm {
 
+/*! \brief Magic number for NDArray list file  */
+constexpr uint64_t kTVMNDArrayListMagic = 0xF7E58D4F05049CB7;
+
 /*! \brief A register name. */
 using RegName = int64_t;
 
@@ -61,9 +64,11 @@ enum class Opcode {
   AllocClosure = 8U,
   GetField = 9U,
   If = 10U,
-  Select = 11U,
-  LoadConst = 12U,
-  Goto = 13U
+  LoadConst = 11U,
+  Goto = 12U,
+  GetTag = 13U,
+  LoadConsti = 14U,
+  Fatal = 15U,
 };
 
 /*! \brief A single virtual machine instruction.
@@ -101,7 +106,7 @@ struct Instruction {
       /*! \brief The register containing the closure. */
       RegName closure;
       /*! \brief The number of arguments to the closure. */
-      Index closure_args_num;
+      Index num_closure_args;
       /*! \brief The closure arguments as an array. */
       RegName* closure_args;
     };
@@ -113,7 +118,7 @@ struct Instruction {
       /*! \brief The source register for a move operation. */
       RegName from;
     };
-    struct /* Packed Operands */ {
+    struct /* InvokePacked Operands */ {
       /*! \brief The index into the packed function table. */
       Index packed_index;
       /*! \brief The arity of the packed function. */
@@ -123,22 +128,16 @@ struct Instruction {
       /*! \brief The arguments to pass to the packed function. */
       RegName* packed_args;
     };
-    struct /* Select Operands */ {
-      /*! \brief The condition of select. */
-      RegName select_cond;
-      /*! \brief The true branch. */
-      RegName select_op1;
-      /*! \brief The false branch. */
-      RegName select_op2;
-    };
     struct /* If Operands */ {
-      /*! \brief The register containing the condition value. */
-      RegName if_cond;
+      /*! \brief The register containing the test value. */
+      RegName test;
+      /*! \brief The register containing the target value. */
+      RegName target;
       /*! \brief The program counter offset for the true branch. */
       Index true_offset;
       /*! \brief The program counter offset for the false branch. */
       Index false_offset;
-    };
+    } if_op;
     struct /* Invoke Operands */ {
       /*! \brief The function to call. */
       Index func_index;
@@ -147,10 +146,14 @@ struct Instruction {
       /*! \brief The registers containing the arguments. */
       RegName* invoke_args_registers;
     };
-    struct /* Const Operands */ {
+    struct /* LoadConst Operands */ {
       /* \brief The index into the constant pool. */
       Index const_index;
     };
+    struct /* LoadConsti Operands */ {
+      /* \brief The index into the constant pool. */
+      Index val;
+    } load_consti;
     struct /* Jump Operands */ {
       /*! \brief The jump offset. */
       Index pc_offset;
@@ -161,6 +164,10 @@ struct Instruction {
       /*! \brief The field to read out. */
       Index field_index;
     };
+    struct /* GetTag Operands */ {
+      /*! \brief The register to project from. */
+      RegName object;
+    } get_tag;
     struct /* AllocDatatype Operands */ {
       /*! \brief The datatype's constructor tag. */
       Index constructor_tag;
@@ -179,19 +186,15 @@ struct Instruction {
     };
   };
 
-  /*! \brief Construct a select instruction.
-   *  \param cond The condition register.
-   *  \param op1 The true register.
-   *  \param op2 The false register.
-   *  \param dst The destination register.
-   *  \return The select instruction.
-   */
-  static Instruction Select(RegName cond, RegName op1, RegName op2, RegName dst);
   /*! \brief Construct a return instruction.
    *  \param return_reg The register containing the return value.
    *  \return The return instruction.
    * */
   static Instruction Ret(RegName return_reg);
+  /*! \brief Construct a fatal instruction.
+   *  \return The fatal instruction.
+   * */  
+  static Instruction Fatal();
   /*! \brief Construct a invoke packed instruction.
    *  \param packed_index The index of the packed function.
    *  \param arity The arity of the function.
@@ -240,13 +243,20 @@ struct Instruction {
    *  \return The get field instruction.
    */
   static Instruction GetField(RegName object_reg, Index field_index, RegName dst);
+  /*! \brief Construct a get_tag instruction.
+   *  \param object_reg The register containing the object to project from.
+   *  \param dst The destination register.
+   *  \return The get_tag instruction.
+   */
+  static Instruction GetTag(RegName object_reg, RegName dst);
   /*! \brief Construct an if instruction.
-   *  \param cond_reg The register containing the condition.
+   *  \param test The register containing the test value.
+   *  \param target The register containing the target value.
    *  \param true_branch The offset to the true branch.
    *  \param false_branch The offset to the false branch.
    *  \return The if instruction.
    */
-  static Instruction If(RegName cond_reg, Index true_branch, Index false_branch);
+  static Instruction If(RegName test, RegName target, Index true_branch, Index false_branch);
   /*! \brief Construct a goto instruction.
    *  \param pc_offset The offset from the current pc.
    *  \return The goto instruction.
@@ -272,6 +282,12 @@ struct Instruction {
    *  \return The load constant instruction.
    */
   static Instruction LoadConst(Index const_index, RegName dst);
+  /*! \brief Construct a load_constanti instruction.
+   *  \param val The interger constant value.
+   *  \param dst The destination register.
+   *  \return The load_constanti instruction.
+   */
+  static Instruction LoadConsti(Index val, RegName dst);
   /*! \brief Construct a move instruction.
    *  \param src The source register.
    *  \param dst The destination register.
@@ -295,14 +311,14 @@ struct Instruction {
 struct VMFunction {
   /*! \brief The function's name. */
   std::string name;
-  /*! \brief The number of function parameters. */
-  Index params;
+  /*! \brief The function parameter names. */
+  std::vector<std::string> params;
   /*! \brief The instructions representing the function. */
   std::vector<Instruction> instructions;
   /*! \brief The size of the frame for this function */
   Index register_file_size;
 
-  VMFunction(const std::string& name, Index params,
+  VMFunction(const std::string& name, std::vector<std::string> params,
              const std::vector<Instruction>& instructions,
              Index register_file_size)
       : name(name),
@@ -357,7 +373,50 @@ struct VMFrame {
  * multiple threads, or serialized them to disk or over the
  * wire.
  */
-struct VirtualMachine {
+class VirtualMachine : public runtime::ModuleNode {
+ public:
+  /*!
+   * \brief Get a PackedFunc from module.
+   *
+   *  The PackedFunc may not be fully initialized,
+   *  there might still be first time running overhead when
+   *  executing the function on certain devices.
+   *  For benchmarking, use prepare to eliminate
+   *
+   * \param name the name of the function.
+   * \param sptr_to_self The shared_ptr that points to this module node.
+   *
+   * \return PackedFunc(nullptr) when it is not available.
+   *
+   * \note The function will always remain valid.
+   *   If the function needs resource from the module(e.g. late linking),
+   *   it should capture sptr_to_self.
+   */
+  virtual PackedFunc GetFunction(const std::string& name,
+                                 const std::shared_ptr<ModuleNode>& sptr_to_self);
+
+  /*!
+   * \brief Invoke a PackedFunction
+   *
+   * \param packed_index The offset of the PackedFunction in all functions.
+   * \param func The PackedFunction to be invoked.
+   * \param arg_count The number of arguments to the PackedFunction.
+   * \param output_size The number of outputs of the PackedFunction.
+   * \param args Arguments to the PackedFunction.
+   *
+   * \note The return value will be stored in the last output_size slots of args.
+   */
+  virtual void InvokePacked(Index packed_index, const PackedFunc& func, Index arg_count,
+                            Index output_size, const std::vector<Object>& args);
+
+  virtual ~VirtualMachine() {}
+
+  const char* type_key() const final {
+    return "VirtualMachine";
+  }
+
+  /*! \brief The runtime module/library that contains generated code. */
+  runtime::Module lib;
   /*! \brief The virtual machine's packed function table. */
   std::vector<PackedFunc> packed_funcs;
   /*! \brief The virtual machine's function table. */
@@ -398,6 +457,12 @@ struct VirtualMachine {
    */
   inline Object ReadRegister(RegName reg) const;
 
+  /*! \brief Read a VM register and cast it to int32_t
+   *  \param reg The register to read from.
+   *  \return The read scalar.
+   */
+  int32_t LoadScalarInt(RegName reg) const;
+
   /*! \brief Invoke a VM function.
    * \param func The function.
    * \param args The arguments to the function.
@@ -419,11 +484,29 @@ struct VirtualMachine {
    *  \param contexts The set of TVM contexts.
    */
   void Init(const std::vector<TVMContext>& contexts);
-  void Run();
+
+  /*! \brief Run VM dispatch loop.
+   */
+  void RunLoop();
+
+  /*! \brief Get device context for params.
+   */
+  TVMContext GetParamsContext() const;
+
+  /*!
+   * \brief Load parameters from the parameter bytearray.
+   * \param params The binary file that contains parameters.
+   */
+  void LoadParams(const std::string& params);
 
   /*! \brief A map from globals (as strings) to their index in the function map.
    */
-  std::unordered_map<std::string, Index> global_map_;
+  std::unordered_map<std::string, Index> global_map;
+
+  /*! \brief A mapping from the packed function (as string) to the index that
+   * corresponds to the position of the `packed_funcs` list.
+   */
+  std::unordered_map<std::string, Index> primitive_map;
 
  private:
   /*! \brief Invoke a global setting up the VM state to execute.
@@ -431,6 +514,10 @@ struct VirtualMachine {
    * This does not begin execution of the VM.
    */
   void InvokeGlobal(const VMFunction& func, const std::vector<Object>& args);
+
+
+  /*! \brief The parameter name to data mapping. */
+  std::unordered_map<std::string, Object> params_;
 };
 
 }  // namespace vm

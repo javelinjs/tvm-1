@@ -28,7 +28,7 @@ import vta.shell._
   *
   * Store 1D and 2D tensors from out-scratchpad (SRAM) to main memory (DRAM).
   */
-class TensorStore(tensorType: String = "true", debug: Boolean = false)
+class TensorStore(tensorType: String = "none", debug: Boolean = false)
   (implicit p: Parameters) extends Module {
   val tp = new TensorParams(tensorType)
   val mp = p(ShellKey).memParams
@@ -69,13 +69,13 @@ class TensorStore(tensorType: String = "true", debug: Boolean = false)
     is (sIdle) {
       when (io.start) {
         state := sWriteCmd
-	when (xsize < xmax) {
+        when (xsize < xmax) {
           xlen := xsize
           xrem := 0.U
-	} .otherwise {
+        } .otherwise {
           xlen := xmax - 1.U
           xrem := xsize - xmax
-	}
+        }
       }
     }
     is (sWriteCmd) {
@@ -89,7 +89,7 @@ class TensorStore(tensorType: String = "true", debug: Boolean = false)
           state := sWriteAck
         } .elsewhen (tag === (numMemBlock - 1).U) {
           state := sReadMem
-	}
+        }
       }
     }
     is (sReadMem) {
@@ -98,27 +98,27 @@ class TensorStore(tensorType: String = "true", debug: Boolean = false)
     is (sWriteAck) {
       when (io.vme_wr.ack) {
         when (xrem === 0.U) {
-	  when (ycnt === ysize - 1.U) {
+          when (ycnt === ysize - 1.U) {
             state := sIdle
-	  } .otherwise {
+          } .otherwise {
             state := sWriteCmd
-	    when (xsize < xmax) {
+            when (xsize < xmax) {
               xlen := xsize
               xrem := 0.U
-	    } .otherwise {
+            } .otherwise {
               xlen := xmax - 1.U
               xrem := xsize - xmax
-	    }
-	  }
-	} .elsewhen (xrem < xmax) {
+            }
+          }
+        } .elsewhen (xrem < xmax) {
           state := sWriteCmd
           xlen := xrem
           xrem := 0.U
-	} .otherwise {
+        } .otherwise {
           state := sWriteCmd
           xlen := xmax - 1.U
           xrem := xrem - xmax
-	}
+        }
       }
     }
   }
@@ -142,8 +142,8 @@ class TensorStore(tensorType: String = "true", debug: Boolean = false)
   val stride = state === sWriteAck &
               io.vme_wr.ack &
               xcnt === xlen + 1.U &
-	      xrem === 0.U &
-	      ycnt =/= ysize - 1.U
+              xrem === 0.U &
+              ycnt =/= ysize - 1.U
 
   when (state === sIdle) {
     ycnt := 0.U
@@ -180,9 +180,11 @@ class TensorStore(tensorType: String = "true", debug: Boolean = false)
   val mdata = MuxLookup(set, 0.U.asTypeOf(chiselTypeOf(wdata_t)), tread)
 
   // write-to-dram
+  val maskOffset = VecInit(Seq.fill(M_DRAM_OFFSET_BITS)(true.B)).asUInt
+  val elemBytes = (p(CoreKey).batch * p(CoreKey).blockOut * p(CoreKey).outBits) / 8
   when (state === sIdle) {
-    waddr_cur := io.baddr + dec.dram_offset
-    waddr_nxt := io.baddr + dec.dram_offset
+    waddr_cur := io.baddr | (maskOffset & (dec.dram_offset << log2Ceil(elemBytes)))
+    waddr_nxt := io.baddr | (maskOffset & (dec.dram_offset << log2Ceil(elemBytes)))
   } .elsewhen (state === sWriteAck && io.vme_wr.ack && xrem =/= 0.U) {
     waddr_cur := waddr_cur + xmax_bytes
   } .elsewhen (stride) {

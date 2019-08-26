@@ -74,9 +74,9 @@ class Closure(Value):
 
 @register_relay_node
 class ConstructorValue(Value):
-    def __init__(self, tag, fields, constructor, types):
+    def __init__(self, tag, fields, constructor):
         self.__init_handle_by_constructor__(
-            _make.ConstructorValue, tag, fields, constructor, types)
+            _make.ConstructorValue, tag, fields, constructor)
 
 
 @register_relay_node
@@ -269,7 +269,6 @@ class Interpreter(Executor):
         self.mod = mod
         self.ctx = ctx
         self.target = target
-        self._intrp = _backend.CreateInterpreter(mod, ctx, target)
 
     def optimize(self):
         """Optimize functions in a module.
@@ -289,7 +288,7 @@ class Interpreter(Executor):
             assert self.mod is not None
         def _interp_wrapper(*args, **kwargs):
             if expr is None:
-                args = self._convert_args(self.mod[self.mod.entry_func], args, kwargs)
+                args = self._convert_args(self.mod["main"], args, kwargs)
             else:
                 args = self._convert_args(expr, args, kwargs)
 
@@ -301,17 +300,18 @@ class Interpreter(Executor):
             if expr is None:
                 pass
             elif isinstance(expr, GlobalVar):
-                self.mod[self.mod.entry_func] = self.mod[expr]
+                self.mod["main"] = self.mod[expr]
             else:
                 assert isinstance(expr, Function)
                 func = Function([], Call(expr, relay_args))
                 relay_args = []
                 if self.mod:
-                    self.mod[self.mod.entry_func] = func
+                    self.mod["main"] = func
                 else:
                     self.mod = module.Module.from_expr(func)
 
             mod = self.optimize()
-            opt_expr = Call(mod[self.mod.entry_func.name_hint], relay_args)
-            return self._intrp(opt_expr)
+            opt_expr = Call(mod["main"], relay_args)
+            _intrp = _backend.CreateInterpreter(mod, self.ctx, self.target)
+            return _intrp(opt_expr)
         return _interp_wrapper

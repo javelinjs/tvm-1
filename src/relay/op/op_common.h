@@ -36,16 +36,6 @@
 namespace tvm {
 namespace relay {
 
-template<typename T>
-inline std::vector<T> AsVector(const Array<T> &array) {
-    std::vector<T> result;
-    result.reserve(array.size());
-    for (const T& ele : array) {
-        result.push_back(ele);
-    }
-    return result;
-}
-
 inline bool UnaryInferLayout(const Array<RelayLayout>& layouts,
                              const Array<Type>& types,
                              int num_inputs,

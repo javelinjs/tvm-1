@@ -15,44 +15,20 @@
 # specific language governing permissions and limitations
 # under the License.
 import tvm
-import numpy
-from tvm import comm_reducer
-from tvm.ir_pass import Simplify, CanonicalSimplify, Equal
 
-def test_simplify():
-    """Not yet working, mock design"""
-    dtype = 'int64'
-    n = tvm.var('n')
-    Ab = tvm.decl_buffer((n, ), dtype)
-    i = tvm.var('i')
-    j = tvm.var('j')
-    # for i in 0 to n-1:
-    stmt = tvm.make.For(
-        i, 2, n, 0, 0,
-        tvm.make.For(j, 0, n, 0, 0,
-                     tvm.make.IfThenElse(
-                         tvm.make.LT(i + 2, n),
-                         tvm.make.Store(Ab.data,
-                                        tvm.make.Load(dtype, Ab.data, i + 4) + 1,
-                                        (j + 1) * 4 - 4 * j + i),
-                         None)))
-    stmt = tvm.ir_pass.CanonicalSimplify(stmt)
+def test_stmt_simplify():
+    ib = tvm.ir_builder.create()
+    A = ib.pointer("float32", name="A")
+    C = ib.pointer("float32", name="C")
+    n = tvm.var("n")
+    with ib.for_range(0, n, name="i") as i:
+        with ib.if_scope(i < 12):
+            A[i] = C[i]
 
-
-def test_basic():
-    m = tvm.var('m')
-    ret = tvm.ir_pass.CanonicalSimplify(tvm.make.Evaluate(m-1))
-    assert str(ret.value) == "(m - 1)"
-
-
-def test_bound():
-    m = tvm.var('m')
-    vrange = tvm.convert({m: tvm.Range(tvm.const(0, "int32"), tvm.const(10, "int32"))})
-    ret = tvm.ir_pass.Simplify(m % 10, vrange)
-    assert ret == m
+    body = tvm.stmt.LetStmt(n, 10, ib.get())
+    body = tvm.ir_pass.CanonicalSimplify(body)
+    assert isinstance(body.body, tvm.stmt.Store)
 
 
 if __name__ == "__main__":
-    test_bound()
-    test_basic()
-    test_simplify()
+    test_stmt_simplify()

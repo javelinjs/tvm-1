@@ -295,12 +295,14 @@ class TypeInferencer : private ExprFunctor<Type(const Expr&)>,
                           op->span);
     }
 
-    // check completness
-    Match match = GetRef<Match>(op);
-    Array<Pattern> unmatched_cases = UnmatchedCases(match, this->mod_);
-    if (unmatched_cases.size() != 0) {
-      LOG(WARNING) << "Match clause " << match <<  " does not handle the following cases: "
+    if (op->complete) {
+      // check completness
+      Match match = GetRef<Match>(op);
+      Array<Pattern> unmatched_cases = UnmatchedCases(match, this->mod_);
+      if (unmatched_cases.size() != 0) {
+        LOG(FATAL) << "Match clause " << match <<  " does not handle the following cases: "
                    << unmatched_cases;
+      }
     }
 
     return rtype;
@@ -313,17 +315,24 @@ class TypeInferencer : private ExprFunctor<Type(const Expr&)>,
   Type VisitExpr_(const LetNode* let) final {
     // if the definition is a function literal, permit recursion
     bool is_functional_literal = let->value.as<FunctionNode>() != nullptr;
+    Type let_type = IncompleteTypeNode::make(Kind::kType);
+
     if (is_functional_literal) {
-      type_map_[let->var].checked_type = IncompleteTypeNode::make(Kind::kType);
+      let_type = GetType(let->var);
+      type_map_[let->var].checked_type = let_type;
+    }
+
+
+    if (let->var->type_annotation.defined()) {
+      let_type = Unify(let_type, let->var->type_annotation, GetRef<Let>(let));
     }
 
     Type vtype = GetType(let->value);
-    if (let->var->type_annotation.defined()) {
-      vtype = Unify(vtype, let->var->type_annotation, GetRef<Let>(let));
-    }
+    let_type = Unify(let_type, vtype, GetRef<Let>(let));
+
     CHECK(is_functional_literal || !type_map_.count(let->var));
     // NOTE: no scoping is necessary because var are unique in program
-    type_map_[let->var].checked_type = vtype;
+    type_map_[let->var].checked_type = let_type;
     return GetType(let->body);
   }
 
@@ -473,7 +482,7 @@ class TypeInferencer : private ExprFunctor<Type(const Expr&)>,
     }
 
     for (size_t i = 0; i < fn_ty->arg_types.size(); i++) {
-      this->Unify(fn_ty->arg_types[i], arg_types[i], call->args[i]);
+      this->Unify(fn_ty->arg_types[i], arg_types[i], GetRef<Call>(call));
     }
 
     for (auto cs : fn_ty->type_constraints) {
@@ -555,6 +564,14 @@ class TypeInferencer : private ExprFunctor<Type(const Expr&)>,
     }
     return FuncTypeNode::make(c->inputs, TypeCallNode::make(c->belong_to, types),
                               td->type_vars, {});
+  }
+
+  void Solve() {
+    solver_.Solve();
+
+    if (err_reporter.AnyErrors()) {
+      err_reporter.RenderErrors(mod_);
+    }
   }
 };
 
@@ -673,7 +690,7 @@ class TypeInferencer::Resolver : public ExprMutator, PatternMutator {
         update_missing_type_annotation_ &&
         !new_var->type_annotation.defined());
 
-    bool need_update_fn = (
+    bool need_update_fn =(
         std::is_base_of<FunctionNode, T>::value &&
         update_missing_type_annotation_ &&
         !new_fn->ret_type.defined());
@@ -738,16 +755,13 @@ class TypeInferencer::Resolver : public ExprMutator, PatternMutator {
 
 
 Expr TypeInferencer::Infer(Expr expr) {
-  // Step 0: Populate the constraints.
+  // Step 1: Populate the constraints.
   GetType(expr);
-  // Step 1: Solve the constraints.
-  solver_.Solve();
 
-  if (err_reporter.AnyErrors()) {
-    err_reporter.RenderErrors(mod_);
-  }
+  // Step 2: Solve the constraints.
+  Solve();
 
-  // Step 2: Attach resolved types to checked_type field.
+  // Step 3: Attach resolved types to checked_type field.
   auto resolved_expr = Resolver(type_map_, &solver_).VisitExpr(expr);
   CHECK(WellFormed(resolved_expr));
   return resolved_expr;
@@ -774,7 +788,7 @@ Expr InferType(const Expr& expr, const Module& mod_ref) {
     // type check it anyway; afterwards we can just recover type
     // from the type-checked function to avoid doing unnecessary work.
 
-    Function func = mod->Lookup(mod->entry_func);
+    Function func = mod->Lookup("main");
 
     // FromExpr wraps a naked expression as a function, we will unbox
     // it here.
@@ -784,7 +798,7 @@ Expr InferType(const Expr& expr, const Module& mod_ref) {
       return func->body;
     }
   } else {
-    auto e = TypeInferencer(mod_ref, mod_ref->entry_func).Infer(expr);
+    auto e = TypeInferencer(mod_ref, mod_ref->GetGlobalVar("main")).Infer(expr);
     CHECK(WellFormed(e));
     auto free_tvars = FreeTypeVars(e, mod_ref);
     CHECK(free_tvars.size() == 0)

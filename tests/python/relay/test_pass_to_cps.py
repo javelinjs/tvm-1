@@ -42,12 +42,12 @@ def test_recursion():
     double = relay.Function([x], x + x)
     i = relay.var("i", t)
     func = relay.Function([i], p.nat_iterate(double, make_nat_expr(p, 3))(i))
-    mod[mod.entry_func] = func
-    mod[mod.entry_func] = to_cps(mod[mod.entry_func], mod=mod)
-    mod[mod.entry_func] = un_cps(mod[mod.entry_func])
+    mod["main"] = func
+    mod["main"] = to_cps(mod["main"], mod=mod)
+    mod["main"] = un_cps(mod["main"])
     ex = create_executor(mod=mod)
     i_nd = rand(dtype, *shape)
-    forward = ex.evaluate(mod.entry_func)(i_nd)
+    forward = ex.evaluate()(i_nd)
     tvm.testing.assert_allclose(forward.asnumpy(), 8 * i_nd.asnumpy())
 
 
@@ -81,6 +81,7 @@ def test_cps_pe():
     destroy_ref(F)
 
     G = relay.Function([cond], relay.If(cond, one, two))
+    G = run_infer_type(G)
     G = relay.transform.gradient(G)
     destroy_ref(G)
 
@@ -91,6 +92,7 @@ def test_cps_pe():
     H = relay.If(cond, x, y)
     H = relay.add(H, z)
     H = relay.Function([cond,x,y,z], H)
+    H = run_infer_type(H)
     H = relay.transform.gradient(H)
     destroy_ref(H)
 

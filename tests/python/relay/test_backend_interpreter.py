@@ -183,11 +183,11 @@ def test_function_taking_adt_ref_tuple():
     prelude = relay.prelude.Prelude(mod)
     intrp = create_executor("debug", mod)
 
-    nil_value = ConstructorValue(prelude.nil.tag, [], prelude.nil, [])
+    nil_value = ConstructorValue(prelude.nil.tag, [], prelude.nil)
     cons_value = ConstructorValue(prelude.cons.tag, [
         TensorValue(np.random.rand(1, 10).astype('float32')),
         nil_value
-    ], prelude.cons, [relay.TensorType((1, 10), 'float32')])
+    ], prelude.cons)
 
     ref_value = RefValue(TensorValue(np.random.rand(1, 10).astype('float32')))
     tuple_value = TupleValue(*[
@@ -224,9 +224,8 @@ def test_tuple_passing():
 
     fn = relay.Function([x], relay.expr.TupleGetItem(x, 0))
     mod = relay.Module({})
-    gv = relay.GlobalVar('fn')
+    gv = relay.GlobalVar('main')
     mod[gv] = fn
-    mod.entry_func = gv
     mod = relay.transform.InferType()(mod)
 
     ctx = tvm.cpu()

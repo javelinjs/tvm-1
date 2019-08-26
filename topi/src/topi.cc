@@ -148,6 +148,16 @@ TVM_REGISTER_GLOBAL("topi.exp")
   *rv = exp(args[0]);
   });
 
+TVM_REGISTER_GLOBAL("topi.cos")
+.set_body([](TVMArgs args, TVMRetValue *rv) {
+  *rv = cos(args[0]);
+  });
+
+TVM_REGISTER_GLOBAL("topi.sin")
+.set_body([](TVMArgs args, TVMRetValue *rv) {
+  *rv = sin(args[0]);
+  });
+
 TVM_REGISTER_GLOBAL("topi.tanh")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
   *rv = tanh(args[0]);
@@ -191,6 +201,12 @@ TVM_REGISTER_GLOBAL("topi.clip")
 TVM_REGISTER_GLOBAL("topi.cast")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
   *rv = cast(args[0], args[1]);
+  });
+
+
+TVM_REGISTER_GLOBAL("topi.reinterpret")
+.set_body([](TVMArgs args, TVMRetValue* rv) {
+  *rv = reinterpret(args[0], args[1]);
   });
 
 TVM_REGISTER_GLOBAL("topi.elemwise_sum")
@@ -311,6 +327,11 @@ TVM_REGISTER_GLOBAL("topi.shape")
   *rv = shape(args[0], args[1]);
 });
 
+TVM_REGISTER_GLOBAL("topi.ndarray_size")
+.set_body([](TVMArgs args, TVMRetValue *rv) {
+  *rv = ndarray_size(args[0], args[1]);
+});
+
 TVM_REGISTER_GLOBAL("topi.split")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
   if (args[1].type_code() == kDLInt || args[1].type_code() == kDLUInt) {
@@ -396,6 +417,14 @@ TVM_REGISTER_GLOBAL("topi.strided_slice")
   *rv = strided_slice(args[0], args[1], args[2], args[3]);
   });
 
+TVM_REGISTER_GLOBAL("topi.one_hot")
+.set_body([](TVMArgs args, TVMRetValue *rv) {
+  int depth = args[3];
+  int axis = args[4];
+  DataType dtype = args[5];
+  *rv = one_hot(args[0], args[1], args[2], depth, axis, dtype);
+  });
+
 /* Ops from nn/upsampling.h */
 TVM_REGISTER_GLOBAL("topi.nn.upsampling")
 .set_body([](TVMArgs args, TVMRetValue *rv) {
@@ -460,6 +489,13 @@ TVM_REGISTER_GLOBAL("topi.nn.pool")
   *rv = nn::pool(args[0], args[1], args[2], args[3],
                  static_cast<nn::PoolType>(static_cast<int>(args[4])),
                  args[5], args[6], args[7]);
+  });
+
+TVM_REGISTER_GLOBAL("topi.nn.pool_grad")
+.set_body([](TVMArgs args, TVMRetValue *rv) {
+  *rv = nn::pool_grad(args[0], args[1], args[2], args[3], args[4],
+                 static_cast<nn::PoolType>(static_cast<int>(args[5])),
+                 args[6], args[7], args[8]);
   });
 
 TVM_REGISTER_GLOBAL("topi.nn.global_pool")

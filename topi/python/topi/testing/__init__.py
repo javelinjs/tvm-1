@@ -24,3 +24,5 @@ from .strided_slice_python import strided_slice_python
 from .batch_matmul import batch_matmul
 from .slice_axis_python import slice_axis_python
 from .sequence_mask_python import sequence_mask
+from .pool_grad_python import pool_grad_nchw
+from .one_hot import one_hot

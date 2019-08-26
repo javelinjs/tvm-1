@@ -78,8 +78,11 @@ class Module(RelayNode):
     def _add(self, var, val, update=False):
         if isinstance(val, _expr.Expr):
             if isinstance(var, _base.string_types):
-                var = _expr.GlobalVar(var)
-            _make.Module_Add(self, var, val, update)
+                if _module.Module_ContainGlobalVar(self, var):
+                    var = _module.Module_GetGlobalVar(self, var)
+                else:
+                    var = _expr.GlobalVar(var)
+            _module.Module_Add(self, var, val, update)
         else:
             assert isinstance(val, _ty.Type)
             if isinstance(var, _base.string_types):
@@ -176,5 +179,26 @@ class Module(RelayNode):
         return _module.Module_LookupTag(self, tag)
 
     @staticmethod
-    def from_expr(expr):
-        return _module.Module_FromExpr(expr)
+    def from_expr(expr, functions=None, type_defs=None):
+        """Construct a module from a standalone expression.
+
+        Parameters
+        ----------
+        expr: Expr
+            The starting expression
+        global_funcs: Optional[dict]
+            Map of global vars to function definitions
+        type_defs: Optional[dict]
+            Map of global type vars to type definitions
+
+
+        Returns
+        -------
+        mod: Module
+            A module containing the passed definitions,
+            where expr is set as the entry point
+            (wrapped in a function if necessary)
+        """
+        funcs = functions if functions is not None else {}
+        defs = type_defs if type_defs is not None else {}
+        return _module.Module_FromExpr(expr, funcs, defs)

@@ -38,6 +38,7 @@ except ImportError:
     from tensorflow.contrib import lite as interpreter_wrapper
 
 import tvm.relay.testing.tf as tf_testing
+from packaging import version as package_version
 
 #######################################################################
 # Generic run functions for TVM & TFLite
@@ -120,10 +121,11 @@ def run_tflite_graph(tflite_model_buf, input_data):
 
 
 def compare_tflite_with_tvm(in_data, in_name, input_tensors,
-                            output_tensors, init_global_variables=False):
+                            output_tensors, init_global_variables=False, out_names=None):
     """Generic function to generate and compare TFLite and TVM output"""
     in_data = convert_to_list(in_data)
     in_name = convert_to_list(in_name)
+    out_names = convert_to_list(out_names)
     in_node = [0] * len(in_name)
     for i in range(len(in_name)):
         in_node[i] = in_name[i].split(':')[0] if ":" in in_name[i] else in_name[i]
@@ -143,7 +145,8 @@ def compare_tflite_with_tvm(in_data, in_name, input_tensors,
                 print("Skip because %s is not enabled" % device)
                 continue
 
-            tvm_output = run_tvm_graph(tflite_model_buffer, in_data, in_node, target=device)
+            tvm_output = run_tvm_graph(tflite_model_buffer, in_data, in_node, target=device,
+                                       num_output=len(out_names), out_names=out_names)
             for i in range(len(tflite_output)):
                 tvm.testing.assert_allclose(tflite_output[i], tvm_output[i], atol=1e-5, rtol=1e-5)
 
@@ -160,6 +163,71 @@ def with_fused_activation_function(input_tensor, fn_name):
     if fn_name == "TANH":
         return math_ops.tanh(input_tensor)
     raise AssertionError("Unknown fused_activation_function {}".format(fn_name))
+
+def _test_split(in_shape, axis, num_Splits, dtype):
+    '''internal split tester taking as parameters in_shape, number of tensors to split into
+       and dtype (data type)'''
+    np_data = np.random.uniform(-5, 5, size=in_shape).astype(dtype)
+    with tf.Graph().as_default():
+        in_data = array_ops.placeholder(shape=in_shape, dtype=dtype)
+        out = array_ops.split(in_data, num_Splits, axis=axis)
+        out_names = ['out_' + str(n) + ':0' for n in range(num_Splits)]
+        compare_tflite_with_tvm([np_data], ['Placeholder:0'],  [in_data], out,
+                                out_names=out_names)
+
+def test_forward_split():
+    '''test split layer'''
+    # rank 1
+    _test_split((3,), 0, 1, 'float32')
+    _test_split((3,), 0, 3, 'float32')
+    _test_split((6,), 0, 3, 'float32')
+    # rank 2
+    _test_split((6, 2), 0, 3, 'float32')
+    _test_split((2, 6), 1, 6, 'float32')
+    # rank 3
+    if package_version.parse(tf.VERSION) >= package_version.parse('1.14.0'):
+        _test_split((6, 2, 4), 0, 2, 'int32')
+
+    _test_split((2, 6, 4), 1, 3, 'float32')
+    _test_split((2, 4, 6), 2, 1, 'float32')
+    # rank 4
+    _test_split((6, 1, 3, 5), 0, 3, 'float32')
+    _test_split((1, 6, 3, 5), 1, 3, 'float32')
+    _test_split((1, 3, 6, 5), 2, 3, 'float32')
+    _test_split((1, 3, 5, 6), 3, 3, 'float32')
+    # split along negative axis
+    _test_split((6, 1, 3, 5), -4, 3, 'float32')
+    _test_split((1, 6, 3, 5), -3, 3, 'float32')
+    _test_split((1, 3, 6, 5), -2, 3, 'float32')
+    _test_split((1, 3, 5, 6), -1, 3, 'float32')
+
+#######################################################################
+# transpose
+# ---------
+
+
+def _test_forward_transpose(ishape, axes=()):
+    data = np.random.uniform(size=ishape).astype(np.float32)
+
+    with tf.Graph().as_default():
+        in_data = array_ops.placeholder(shape=data.shape, dtype=data.dtype)
+
+        if not axes:
+            out = array_ops.transpose(in_data)
+        else:
+            out = array_ops.transpose(in_data, axes)
+
+        compare_tflite_with_tvm(data, 'Placeholder:0', [in_data], [out])
+
+
+def test_forward_transpose():
+    _test_forward_transpose((2, 2))
+    _test_forward_transpose((2, 3, 4))
+    _test_forward_transpose((7, 8, 8, 10))
+    _test_forward_transpose((2, 3, 4), (1, 2, 0))
+    _test_forward_transpose((2, 3, 4), (0, 1, 2))
+    _test_forward_transpose((2, 3, 4, 5), (3, 0, 1, 2))
+    _test_forward_transpose((2, 3, 4, 5), ())
 
 
 #######################################################################
@@ -582,6 +650,41 @@ def test_forward_pad():
 
 
 #######################################################################
+# Pack
+# -------------
+
+def _test_pack(data, axis):
+    """ One iteration of pack """
+
+    assert len(data) >= 1
+
+    with tf.Graph().as_default():
+        in_data = [
+            array_ops.placeholder(shape=tensor.shape, dtype=tensor.dtype, name="in_{}".format(idx))
+            for idx, tensor in enumerate(data)]
+        out = array_ops.pack(in_data, axis=axis)
+        name = ["in_{}:0".format(idx) for idx in range(len(data))]
+
+        compare_tflite_with_tvm(data, name, in_data, [out])
+
+
+def test_forward_pack():
+    """ Pack """
+    _test_pack(
+        [np.arange(6).reshape((1, 2, 1, 3)),
+        np.arange(6).reshape((1, 2, 1, 3))], 1)
+
+    _test_pack(
+        [np.arange(6).reshape((3, 2)),
+         np.arange(6).reshape((3, 2))], 1)
+
+    _test_pack(
+        [np.arange(6).reshape((2, 1, 1, 3)),
+         np.arange(6).reshape((2, 1, 1, 3)),
+         np.arange(6).reshape((2, 1, 1, 3))], 1)
+
+
+#######################################################################
 # Logistic
 # --------
 
@@ -747,9 +850,16 @@ def test_forward_ssd_mobilenet_v1():
 # Main
 # ----
 if __name__ == '__main__':
+    # Split
+    test_forward_split()
+
+    # Transpose
+    test_forward_transpose()
+
     # Transforms
     test_forward_concatenation()
     test_forward_pad()
+    test_forward_pack()
     test_forward_reshape()
     test_all_resize()
     test_forward_squeeze()

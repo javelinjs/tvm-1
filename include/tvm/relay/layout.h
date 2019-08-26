@@ -23,7 +23,7 @@ class RelayLayout : public NodeRef {
    * \param rhs Another layout.
    * \return whether the two layouts are equal.
    */
-  inline bool Equals(const RelayLayout &rhs) const;
+  bool Equals(const RelayLayout& rhs) const;
   using ContainerType = RelayLayoutNode;
 };
 

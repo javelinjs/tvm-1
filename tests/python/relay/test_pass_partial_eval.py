@@ -18,14 +18,14 @@
 import numpy as np
 import tvm
 from tvm import relay
-from tvm.relay.analysis import alpha_equal
+from tvm.relay.analysis import alpha_equal, assert_alpha_equal
 from tvm.relay.prelude import Prelude
 from tvm.relay import op, create_executor, transform
 from tvm.relay import Var, TypeVar, TupleGetItem, Let, Function, const, RefRead, RefWrite, RefCreate
 from tvm.relay import TensorType, Tuple, If, Module, Clause, PatternConstructor, PatternVar, Match
 from tvm.relay import GlobalVar, Call
 from tvm.relay.transform import gradient
-from tvm.relay.testing import add_nat_definitions, make_nat_expr
+from tvm.relay.testing import add_nat_definitions, make_nat_expr, run_infer_type
 
 def check_eval(expr, expected_result, mod=None, rtol=1e-07):
     ctx = tvm.context("llvm", 0)
@@ -41,7 +41,7 @@ def run_opt_pass(expr, passes):
     seq = transform.Sequential(passes)
     with transform.PassContext(opt_level=3):
        mod = seq(mod)
-    entry = mod[mod.entry_func]
+    entry = mod["main"]
     return entry if isinstance(expr, relay.Function) else entry.body
 
 
@@ -54,13 +54,13 @@ def dcpe(expr, mod=None, grad=False):
     passes = [transform.PartialEvaluate(),
               transform.DeadCodeElimination(inline_once=True)]
     if grad:
-        expr = gradient(expr)
+        expr = gradient(run_infer_type(expr))
     if mod:
         assert isinstance(expr, Function)
-        mod[mod.entry_func] = expr
+        mod["main"] = expr
         seq = transform.Sequential(passes)
         mod = seq(mod)
-        return mod[mod.entry_func]
+        return mod["main"]
     return run_opt_pass(expr, passes)
 
 
@@ -123,7 +123,7 @@ def test_ad():
     body = relay.Let(x1, o, body)
     expected = Function([d], relay.Let(x, m, body))
     expected = run_opt_pass(expected, transform.InferType())
-    assert alpha_equal(g, expected)
+    assert_alpha_equal(g, expected)
 
 
 def test_if_ref():
@@ -192,8 +192,8 @@ def test_map():
     orig = p.map(f, p.cons(const(1), p.cons(const(2), p.cons(const(3), p.nil()))))
     expected = p.cons((const(1)), p.cons((const(2)), p.cons((const(3)), p.nil())))
     expected = Function([], expected)
-    mod[mod.entry_func] = expected
-    expected = mod[mod.entry_func]
+    mod["main"] = expected
+    expected = mod["main"]
     orig = Function([], orig)
     res = dcpe(orig, mod=mod)
     assert alpha_equal(res.body, expected.body)
@@ -206,8 +206,8 @@ def test_loop():
     loop = GlobalVar("loop")
     mod[loop] = Function([x], loop(x), t, [t])
     expected = Call(loop, [const(1)])
-    mod[mod.entry_func] = Function([], expected)
-    expected = mod[mod.entry_func].body
+    mod["main"] = Function([], expected)
+    expected = mod["main"].body
     call = Function([], loop(const(1)))
     res = dcpe(call, mod=mod)
     assert alpha_equal(res.body, expected)
@@ -306,7 +306,33 @@ def test_double():
     assert alpha_equal(res.body, make_nat_expr(p, 6))
 
 
+def test_concat():
+    t = relay.TensorType([10], "float32")
+    x = Var("x", t)
+    y = Var("x", t)
+    orig = run_infer_type(Function([x, y], op.concatenate([x, y], axis=0)))
+    assert_alpha_equal(dcpe(orig), orig)
+
+
+def test_triangle_number():
+    t = relay.TensorType([], "int32")
+    x = Var("x", t)
+    f_var = Var("f")
+    f = Function([x], If(op.equal(x, const(0)), const(0), x + f_var(x - const(1))))
+    orig = run_infer_type(Let(f_var, f, f_var(const(10))))
+    assert_alpha_equal(dcpe(orig), const(55))
+
+
+def test_nat_update():
+    m = Module()
+    p = Prelude(m)
+    add_nat_definitions(p)
+    m = transform.ToANormalForm()(m)
+    transform.PartialEvaluate()(m)
+
+
 if __name__ == '__main__':
+    test_nat_update()
     test_ref()
     test_tuple()
     test_empty_ad()
@@ -323,3 +349,5 @@ if __name__ == '__main__':
     test_nat_id()
     test_global_match_nat_id()
     test_match_nat_id()
+    test_concat()
+    test_triangle_number()

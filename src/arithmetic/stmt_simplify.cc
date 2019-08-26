@@ -31,15 +31,43 @@
 
 namespace tvm {
 namespace arith {
-// statement simplifier
+
 using namespace ir;
 
 class StmtSimplifier : public IRMutator {
  public:
+  using IRMutator::Mutate;
+
+  Expr Mutate(Expr expr) final {
+    return analyzer_.Simplify(expr);
+  }
+
+  Stmt Simplify(Stmt stmt, Map<Var, Range> vrange) {
+    for (auto kv : vrange) {
+      analyzer_.Bind(kv.first, kv.second);
+    }
+    return Mutate(stmt);
+  }
+
   Stmt Mutate_(const For* op, const Stmt& s) final {
-    Var loop_var(op->loop_var.node_);
-    analyzer_.Bind(loop_var, Range::make_by_min_extent(op->min, op->extent));
+    analyzer_.Bind(op->loop_var,
+                   Range::make_by_min_extent(op->min, op->extent));
     return IRMutator::Mutate_(op, s);
+  }
+
+  Stmt Mutate_(const LetStmt* op, const Stmt& s) final {
+    Expr value = this->Mutate(op->value);
+    if (!ir::HasSideEffect(value)) {
+      analyzer_.Bind(op->var, value);
+      return this->Mutate(op->body);
+    }
+    Stmt body = this->Mutate(op->body);
+    if (value.same_as(op->value) &&
+        body.same_as(op->body)) {
+      return s;
+    } else {
+      return LetStmt::make(op->var, value, body);
+    }
   }
 
   // IfThenElse
@@ -124,28 +152,12 @@ class StmtSimplifier : public IRMutator {
   std::unordered_map<const Variable*, Range> var_dom_;
 };
 
-
-class CanonicalStmtSimplifier : public StmtSimplifier {
- public:
-  using StmtSimplifier::Mutate;
-  Expr Mutate(Expr expr) final {
-    return analyzer_.canonical_simplify(expr);
-  }
-
-  Stmt CanonicalSimplify(Stmt stmt, Map<Var, Range> vrange) {
-    for (auto kv : vrange) {
-      analyzer_.Bind(kv.first, kv.second);
-    }
-    return Mutate(stmt);
-  }
-};
-
 }  // namespace arith
 
 namespace ir {
 
 Stmt CanonicalSimplify(Stmt stmt, Map<Var, Range> vrange) {
-  return arith::CanonicalStmtSimplifier().CanonicalSimplify(
+  return arith::StmtSimplifier().Simplify(
       stmt, vrange);
 }
 
@@ -167,7 +179,7 @@ Expr Simplify(Expr expr, Map<Var, Range> vrange) {
 }
 
 Stmt Simplify(Stmt stmt, Map<Var, Range> vrange) {
-  return arith::CanonicalStmtSimplifier().CanonicalSimplify(
+  return arith::StmtSimplifier().Simplify(
       stmt, vrange);
 }
 }  // namespace ir

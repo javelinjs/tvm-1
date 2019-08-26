@@ -30,6 +30,7 @@
 
 #include "codegen_llvm.h"
 #include "codegen_cpu.h"
+#include "../build_common.h"
 #include "../../pass/ir_util.h"
 #include "../../arithmetic/compute_expr.h"
 
@@ -109,6 +110,7 @@ void CodeGenLLVM::InitFuncState() {
   analyzer_.reset(new arith::Analyzer());
 }
 
+
 void CodeGenLLVM::AddFunctionInternal(const LoweredFunc& f, bool ret_void) {
   this->InitFuncState();
   std::vector<llvm::Type*> arg_types;
@@ -166,9 +168,9 @@ void CodeGenLLVM::AddFunctionInternal(const LoweredFunc& f, bool ret_void) {
   }
 }
 
+
 std::unique_ptr<llvm::Module> CodeGenLLVM::Finish() {
   this->AddStartupFunction();
-  // link modules
   for (size_t i = 0; i < link_modules_.size(); ++i) {
     CHECK(!llvm::Linker::linkModules(*module_, std::move(link_modules_[i])))
         << "Failed to link modules";
@@ -419,6 +421,20 @@ void CodeGenLLVM::GetAlignment(Type t,
   *p_alignment = align_bits / 8;
 }
 
+std::unique_ptr<CodeGenLLVM::DebugInfo>
+CodeGenLLVM::CreateDebugInfo(llvm::Module* module) {
+  auto debug_info = llvm::make_unique<CodeGenLLVM::DebugInfo>();
+  debug_info->di_builder_ = llvm::make_unique<llvm::DIBuilder>(*module);
+  // TODO(tulloch): pass this information through relay::Span classes to the LoweredFunc instance?
+  debug_info->file_ = debug_info->di_builder_->createFile("model.tvm", "/tmp/");
+  debug_info->compilation_unit_ = debug_info->di_builder_->createCompileUnit(
+      llvm::dwarf::DW_LANG_C, debug_info->file_, "TVM", 0, "", 0, "",
+      llvm::DICompileUnit::DebugEmissionKind::FullDebug,
+      /* SplitDebugInlining */ true,
+      /* DebugInfoForProfiling */ true);
+  return debug_info;
+}
+
 llvm::Value* CodeGenLLVM::CreateBroadcast(llvm::Value* value, int lanes) {
   llvm::Constant* undef = llvm::UndefValue::get(
       llvm::VectorType::get(value->getType(), lanes));
@@ -431,6 +447,7 @@ llvm::Value* CodeGenLLVM::CreateBroadcast(llvm::Value* value, int lanes) {
 llvm::Value* CodeGenLLVM::CreateVecSlice(llvm::Value* vec, int begin, int extent) {
   int num_elems = static_cast<int>(vec->getType()->getVectorNumElements());
   if (extent == num_elems && begin == 0) return vec;
+  CHECK(begin >= 0 && extent <= num_elems) << "Slicing out of bound!\n";
   std::vector<llvm::Constant*> indices;
   indices.reserve(extent);
   for (int i = 0; i < extent; ++i) {
@@ -466,6 +483,7 @@ llvm::Value* CodeGenLLVM::CreateVecPad(llvm::Value* vec, int target_lanes) {
 llvm::Value* CodeGenLLVM::CreateVecConcat(std::vector<llvm::Value*> vecs) {
   // concat vector, tree shape reduction
   int total_lanes = 0;
+
   for (llvm::Value* v : vecs) {
     total_lanes += static_cast<int>(
         v->getType()->getVectorNumElements());
@@ -637,12 +655,14 @@ llvm::Value* CodeGenLLVM::CreateIntrinsic(const Call* op) {
     CHECK_GE(op->args.size(), 2U);
     llvm::Intrinsic::ID id = static_cast<llvm::Intrinsic::ID>(
         op->args[0].as<UIntImm>()->value);
-    uint64_t num_signature = op->args[1].as<UIntImm>()->value;
+    const uint64_t *num_signature = as_const_uint(op->args[1]);
+    CHECK(num_signature) << "The second argument should be a uint represents number of arguments, "
+                         << "but " << op->args[1] << " got!\n";
     std::vector<llvm::Value*> arg_value;
     std::vector<llvm::Type*> sig_type;
     for (size_t i = 2; i < op->args.size(); ++i) {
       arg_value.push_back(MakeValue(op->args[i]));
-      if (i - 2 < num_signature) {
+      if (i - 2 < *num_signature) {
         sig_type.push_back(arg_value.back()->getType());
       }
     }
@@ -748,9 +768,7 @@ void CodeGenLLVM::Scalarize(const Expr& e,
                             std::function<void(int i, llvm::Value* v)> f) {
   if (const Ramp* ramp = e.as<Ramp>()) {
     for (int i = 0; i < ramp->type.lanes(); ++i) {
-      Expr offset = arith::ComputeExpr<Add>(
-          ramp->base,
-          arith::ComputeExpr<Mul>(ramp->stride, i));
+      Expr offset = ramp->base + (ramp->stride * i);
       f(i, MakeValue(offset));
     }
   } else {
@@ -972,7 +990,9 @@ llvm::Value* CodeGenLLVM::VisitExpr_(const Call* op) {
              op->call_type == Call::PureExtern) {
     return CreateCallExtern(op);
   } else {
-    LOG(FATAL) << "Unknown call type ";
+    LOG(FATAL) << "Unknown call type " <<
+      "name= " << op->name <<
+      " call_type= " << op->call_type;
     return nullptr;
   }
 }
@@ -985,6 +1005,26 @@ llvm::Value* CodeGenLLVM::VisitExpr_(const Ramp* op) {
         ConstInt32(i));
   }
   return vec;
+}
+
+llvm::Value* CodeGenLLVM::VisitExpr_(const Shuffle* op) {
+  std::vector<llvm::Value *> vecs(op->vectors.size());
+  int total_lanes = 0;
+  for (int i = 0, e = op->vectors.size(); i < e; ++i) {
+    vecs[i] = VisitExpr(op->vectors[i]);
+    total_lanes += op->vectors[i].type().lanes();
+  }
+  llvm::Value* v0 = CreateVecConcat(vecs);
+  std::vector<uint32_t> idx(op->indices.size());
+  for (int i = 0, e = op->indices.size(); i < e; ++i) {
+    const int64_t *val = as_const_int(op->indices[i]);
+    CHECK(val && *val >= 0 && *val  < total_lanes) << "Shuffled indeces are suppose to be int, "
+      << "but get " << op->indices[i] << "\n";
+    idx[i] = *val;
+  }
+  llvm::Value* mask = llvm::ConstantDataVector::get(builder_->getContext(), idx);
+  auto res = builder_->CreateShuffleVector(v0, llvm::UndefValue::get(v0->getType()), mask);
+  return res;
 }
 
 llvm::Value* CodeGenLLVM::VisitExpr_(const Broadcast* op) {

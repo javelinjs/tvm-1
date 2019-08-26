@@ -14,7 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-# pylint: disable=invalid-name
+# pylint: disable=invalid-name,arguments-differ,no-else-return,unused-argument,missing-docstring
 """
 Relay pass transformation infrastructure.
 """
@@ -22,7 +22,9 @@ import types
 import inspect
 import functools
 
+import tvm
 from tvm._ffi.runtime_ctypes import TVMContext
+from tvm import relay
 from . import _transform
 from .base import RelayNode, register_relay_node
 from .. import nd as _nd
@@ -30,7 +32,7 @@ from .. import nd as _nd
 
 @register_relay_node
 class PassInfo(RelayNode):
-    """The class that contains the meta data required by a pass. It is the
+    """The class contains the meta data required by a pass. It is the
     container of information needed by running an optimization or analysis.
     This class can be extended by adding new members when more meta data is
     needed.
@@ -130,11 +132,12 @@ def build_config(opt_level=2,
                 "SimplifyInference": 0,
                 "OpFusion": 1,
                 "FoldConstant": 2,
-                "CombineParallelConv2D": 3,
                 "FoldScaleAxis": 3,
                 "AlterOpLayout": 3,
                 "CanonicalizeOps": 3,
+                "CanonicalizeCast": 3,
                 "EliminateCommonSubexpr": 3,
+                "CombineParallelConv2D": 4,
             }
 
     fallback_device : int, str, or tvm.TVMContext, optional
@@ -271,7 +274,7 @@ def FoldScaleAxis():
     Note
     ----
     Internally, we will call backward_fold_scale_axis before using
-    forward_fold_scale_axis. As backward folding targets common conv-bn
+    forward_fold_scale_axis as backward folding targets the common conv->bn
     pattern.
     """
     return _transform.FoldScaleAxis()
@@ -288,8 +291,8 @@ def BackwardFoldScaleAxis():
     Note
     ----
     It is recommended to call backward_fold_scale_axis
-    before using forward_fold_scale_axis.
-    As backward folding targets common conv-bn pattern.
+    before using forward_fold_scale_axis as backward folding targets the common
+    conv->bn pattern.
     """
     return _transform.BackwardFoldScaleAxis()
 
@@ -305,8 +308,8 @@ def ForwardFoldScaleAxis():
     Note
     ----
     It is recommended to call backward_fold_scale_axis
-    before using forward_fold_scale_axis.
-    As backward folding targets common conv-bn pattern.
+    before using forward_fold_scale_axis, as backward folding targets the
+    common conv->bn pattern.
     """
     return _transform.ForwardFoldScaleAxis()
 
@@ -324,9 +327,9 @@ def SimplifyInference():
 
 
 def CanonicalizeOps():
-    """ Canonicalize special operators to basic operators.
-    This can simplify followed analysis. (e.g. expanding bias_add to
-    expand_dims and broadcast_add.)
+    """Canonicalize special operators to basic operators.
+    This can simplify followed analysis, e.g. expanding bias_add to
+    expand_dims and broadcast_add.
 
     Returns
     -------
@@ -337,7 +340,7 @@ def CanonicalizeOps():
 
 
 def DeadCodeElimination(inline_once=False):
-    """Remove expressions which does not effect the program result (dead code).
+    """Remove expressions that do not have any users (dead code).
 
     Parameters
     ----------
@@ -353,7 +356,7 @@ def DeadCodeElimination(inline_once=False):
 
 
 def FoldConstant():
-    """Fold the constant expression in expr.
+    """Fold the constant expressions in a Relay program.
 
     Returns
     -------
@@ -413,6 +416,21 @@ def AlterOpLayout():
         The registered pass that alters the layout of operators.
     """
     return _transform.AlterOpLayout()
+
+
+def Legalize():
+    """Legalizes an expression with another expression.
+    This pass can be used to replace an expr with another expr for target
+    dependent optimizations. For example, one expr, though semnatically
+    equivalent to the other, can have better performance on a target. This pass
+    can be used to legalize the expr in a target-dependent manner.
+
+    Returns
+    -------
+    ret : tvm.relay.Pass
+        The registered pass that rewrites an expr.
+    """
+    return _transform.Legalize()
 
 
 def RewriteAnnotatedOps(fallback_device):
@@ -476,7 +494,7 @@ def EtaExpand():
 
 
 def ToGraphNormalForm():
-    """Turn A Normal Form expression into Graph Normal Form expression
+    """Turn a Relay program in A Normal Form into Graph Normal Form
 
     Returns
     -------
@@ -531,6 +549,30 @@ def CanonicalizeCast():
         The registered pass that canonicalizes cast expression.
     """
     return _transform.CanonicalizeCast()
+
+
+def LambdaLift():
+    """
+    Lift the closure to global function.
+
+    Returns
+    -------
+    ret : tvm.relay.Pass
+        The registered pass that lifts the lambda function.
+    """
+    return _transform.LambdaLift()
+
+
+def PrintIR():
+    """
+    Print the IR for a module to help debugging.
+
+    Returns
+    -------
+    ret : tvm.relay.Pass
+        The registered pass that prints the module IR.
+    """
+    return _transform.PrintIR()
 
 
 def gradient(expr, mod=None, mode='higher_order'):
@@ -864,3 +906,40 @@ def function_pass(pass_func=None, opt_level=None, name=None, required=None):
     if pass_func:
         return create_function_pass(pass_func)
     return create_function_pass
+
+@function_pass(opt_level=1)
+class ChangeBatch:
+    """
+    Change the batch size.
+
+    Parameters
+    ----------
+    data: Dict[relay.Var, int]
+      A dictionary of all the params to change.
+      The keys are all params, and the values are which dimension hold the batch.
+
+    batch_size: int
+      The batch size to change to.
+
+    Returns
+    -------
+    pass: FunctionPass
+      The pass.
+    """
+    def __init__(self, data, batch_size=16):
+        self.data = data
+        self.batch_size = batch_size
+
+    def transform_function(self, func, mod, ctx):
+        func = relay.Function(func.params, func.body, None, func.type_params, func.attrs)
+        change_batch = self
+        class ChangeBatchMutator(tvm.relay.ExprMutator):
+            def visit_var(self, var):
+                if var in change_batch.data:
+                    ty = var.type_annotation
+                    new_shape = list(ty.shape)
+                    new_shape[change_batch.data[var]] = change_batch.batch_size
+                    return relay.Var(var.name_hint, relay.TensorType(new_shape, ty.dtype))
+                else:
+                    return var
+        return ChangeBatchMutator().visit(func)

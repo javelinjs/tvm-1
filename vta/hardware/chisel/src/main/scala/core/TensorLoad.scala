@@ -24,7 +24,7 @@ import chisel3.util._
 import vta.util.config._
 import vta.shell._
 
-/** TensorStore.
+/** TensorLoad.
   *
   * Load 1D and 2D tensors from main memory (DRAM) to input/weight
   * scratchpads (SRAM). Also, there is support for zero padding, while
@@ -48,7 +48,7 @@ class TensorLoad(tensorType: String = "none", debug: Boolean = false)
   val strideFactor = tp.tensorLength * tp.tensorWidth
 
   val dec = io.inst.asTypeOf(new MemDecode)
-  val dataCtrl = Module(new TensorDataCtrl(sizeFactor, strideFactor))
+  val dataCtrl = Module(new TensorDataCtrl(tensorType, sizeFactor, strideFactor))
   val dataCtrlDone = RegInit(false.B)
   val yPadCtrl0 = Module(new TensorPadCtrl(padType = "YPad0", sizeFactor))
   val yPadCtrl1 = Module(new TensorPadCtrl(padType = "YPad1", sizeFactor))
@@ -67,20 +67,20 @@ class TensorLoad(tensorType: String = "none", debug: Boolean = false)
       when (io.start) {
         when (dec.ypad_0 =/= 0.U) {
           state := sYPad0
-	} .elsewhen (dec.xpad_0 =/= 0.U) {
+        } .elsewhen (dec.xpad_0 =/= 0.U) {
           state := sXPad0
-	} .otherwise {
+        } .otherwise {
           state := sReadCmd
-	}
+        }
       }
     }
     is (sYPad0) {
       when (yPadCtrl0.io.done) {
         when (dec.xpad_0 =/= 0.U) {
           state := sXPad0
-	} .otherwise {
+        } .otherwise {
           state := sReadCmd
-	}
+        }
       }
     }
     is (sXPad0) {
@@ -96,22 +96,22 @@ class TensorLoad(tensorType: String = "none", debug: Boolean = false)
     is (sReadData) {
       when (io.vme_rd.data.valid) {
         when (dataCtrl.io.done) {
-	  when (dec.xpad_1 =/= 0.U) {
-	    state := sXPad1
-	  } .elsewhen (dec.ypad_1 =/= 0.U) {
-	    state := sYPad1
-	  } .otherwise  {
-	    state := sIdle
-	  }
-	} .elsewhen (dataCtrl.io.stride || dataCtrl.io.split) {
           when (dec.xpad_1 =/= 0.U) {
-	    state := sXPad1
-	  } .elsewhen (dec.xpad_0 =/= 0.U) {
+            state := sXPad1
+          } .elsewhen (dec.ypad_1 =/= 0.U) {
+            state := sYPad1
+          } .otherwise  {
+            state := sIdle
+          }
+        } .elsewhen (dataCtrl.io.stride || dataCtrl.io.split) {
+          when (dec.xpad_1 =/= 0.U) {
+            state := sXPad1
+          } .elsewhen (dec.xpad_0 =/= 0.U) {
             state := sXPad0
-	  } .otherwise {
+          } .otherwise {
               state := sReadCmd
-	  }
-	}
+          }
+        }
       }
     }
     is (sXPad1) {
@@ -161,9 +161,9 @@ class TensorLoad(tensorType: String = "none", debug: Boolean = false)
 
   xPadCtrl0.io.start := dec.xpad_0 =/= 0.U &
                           ((state === sIdle & io.start) |
-			  (state === sYPad0 & yPadCtrl0.io.done) |
+                          (state === sYPad0 & yPadCtrl0.io.done) |
                           (io.vme_rd.data.fire() & ~dataCtrlDone & (dataCtrl.io.stride | dataCtrl.io.split) & dec.xpad_1 === 0.U) |
-			  (state === sXPad1 & xPadCtrl1.io.done & ~dataCtrlDone))
+                          (state === sXPad1 & xPadCtrl1.io.done & ~dataCtrlDone))
 
   xPadCtrl1.io.start := dec.xpad_1 =/= 0.U & io.vme_rd.data.fire() &
                           ((dataCtrl.io.done) |
@@ -184,8 +184,8 @@ class TensorLoad(tensorType: String = "none", debug: Boolean = false)
   // write-to-sram
   val isZeroPad = state === sYPad0 |
                   state === sXPad0 |
-		  state === sXPad1 |
-		  state === sYPad1
+                  state === sXPad1 |
+                  state === sYPad1
 
   when (state === sIdle || state === sReadCmd || tag === (tp.numMemBlock - 1).U) {
     tag := 0.U

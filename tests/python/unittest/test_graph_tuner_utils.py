@@ -64,7 +64,7 @@ def test_has_multiple_inputs():
 
 
 def test_expr2graph():
-    net, _ = resnet.get_workload(num_layers=50, batch_size=1)
+    mod, _ = resnet.get_workload(num_layers=50, batch_size=1)
     node_dict = {}
     node_list = []
     target_ops = ["conv2d"]
@@ -80,9 +80,9 @@ def test_expr2graph():
             op_name_list.append("Tuple")
         else:
             op_name_list.append("null")
-    relay.analysis.post_order_visit(net, _count_node)
+    relay.analysis.post_order_visit(mod["main"], _count_node)
 
-    expr2graph(net, target_ops, node_dict, node_list)
+    expr2graph(mod["main"], target_ops, node_dict, node_list)
     for i, item in enumerate(zip(op_name_list, node_list)):
         op_name, node = item
         assert op_name == node["op"], "%dth Node operator mismatch: expecting %s but got %s" \
@@ -106,7 +106,7 @@ def test_get_direct_ancestor():
     visited_dict = {}
     input_names = ["data"]
     out = get_direct_ancestor(node_list, visited_dict, target_ops, 5, input_names)
-    assert out == [2, 0], "Output mismatch: expecting [2, 0] but got %s." % str(out)
+    assert out == [0], "Output mismatch: expecting [0] but got %s." % str(out)
 
 
 def test_get_in_nodes():
@@ -125,7 +125,7 @@ def test_get_in_nodes():
     node_dict = {}
     expr2graph(net, target_ops, node_dict, node_list)
     out = get_in_nodes(node_list, target_ops, input_names)
-    expected_out = {7: [3], 3: [2, 0], 2: [0]}
+    expected_out = {3: [0], 4: [3, 0], 7: [4]}
     diff_set = set(out) ^ set(expected_out)
     if len(diff_set) != 0:
         raise RuntimeError("Output mismatch: expecting %s but got %s." % (str(expected_out), str(out)))

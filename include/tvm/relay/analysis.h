@@ -34,20 +34,6 @@ namespace tvm {
 namespace relay {
 
 /*!
- * \brief Infer the type of a function as if it is mapped to var in the mod.
- *
- * \param f the function.
- * \param mod The module used for referencing global functions.
- * \param var The global variable corresponding to the function.
- *
- * \return A type checked Function with its checked_type field populated.
- * \note this function mutates mod and is not thread-safe.
- */
-TVM_DLL Function InferType(const Function& f,
-                           const Module& mod,
-                           const GlobalVar& var);
-
-/*!
  * \brief Check that types are well kinded by applying "kinding rules".
  *
  * This pass ensures we do not do things that violate the design of the
@@ -64,6 +50,18 @@ TVM_DLL Function InferType(const Function& f,
  * \return The kind of the passed type.
  */
 TVM_DLL Kind KindCheck(const Type& t, const Module& mod);
+
+/*!
+ * \brief Check whether an expression is constant.
+ *
+ * If the inputs of an expression are all constant, it means the expression
+ * itself is constant also.
+ *
+ * \param e the expression.
+ *
+ * \return whether the expression is constant.
+ */
+TVM_DLL bool ConstantCheck(const Expr& e);
 
 /*!
  * \brief Compare two expressions for structural equivalence.

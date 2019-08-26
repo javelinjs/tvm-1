@@ -17,11 +17,12 @@
 #pylint: disable=invalid-name, unused-argument
 """Backend compiler related feature registration"""
 from __future__ import absolute_import
-from ..expr import const
+from ..expr import const, Tuple, TupleGetItem
 from .op import register_gradient
 from .transform import collapse_sum_like, broadcast_to_like, where
-from .tensor import exp, negative, power, less
+from .tensor import exp, negative, power, less, cos, sin
 from .tensor import zeros_like, ones_like
+from . import nn as _nn
 
 
 @register_gradient("log")
@@ -30,6 +31,18 @@ def log_grad(orig, grad):
     x = orig.args[0]
     return [grad * ones_like(x) / x]
 
+@register_gradient("cos")
+def cos_grad(orig, grad):
+    """Returns [grad * (-sin(x))]"""
+    x = orig.args[0]
+    ones = ones_like(x)
+    return [grad * (-ones * sin(x))]
+
+@register_gradient("sin")
+def sin_grad(orig, grad):
+    """Returns [grad * cos(x)]"""
+    x = orig.args[0]
+    return [grad * cos(x)]
 
 @register_gradient("exp")
 def exp_grad(orig, grad):
@@ -95,21 +108,36 @@ def divide_grad(orig, grad):
             collapse_sum_like(- (grad * orig / y), y)]
 
 
+@register_gradient("zeros")
+def zeros_grad(orig, grad):
+    """Returns []"""
+    return []
+
+
+@register_gradient("ones")
+def ones_grad(orig, grad):
+    """Returns []"""
+    return []
+
+
 @register_gradient("zeros_like")
 def zeros_like_grad(orig, grad):
     """Returns [0]"""
     return [orig]
+
 
 @register_gradient("ones_like")
 def ones_like_grad(orig, grad):
     """Returns [0]"""
     return [zeros_like(orig.args[0])]
 
+
 @register_gradient("collapse_sum_like")
 def collapse_sum_like_grad(orig, grad):
     """Returns [broadcast_to_like(grad, x), 0]"""
     x, y = orig.args
     return [broadcast_to_like(grad, x), zeros_like(y)]
+
 
 @register_gradient("abs")
 def abs_grad(orig, grad):
@@ -118,3 +146,44 @@ def abs_grad(orig, grad):
     zeros = zeros_like(x)
     ones = ones_like(x)
     return [where(less(x, zeros), -ones * grad, ones * grad)]
+
+
+@register_gradient("clip")
+def clip_grad(orig, grad):
+    """Returns grad * (select(x < min || max < x , 0, 1))."""
+    x = orig.args[0]
+    a_min = orig.attrs.get_int("a_min")
+    a_max = orig.attrs.get_int("a_max")
+    a_mins = broadcast_to_like(const(a_min), x)
+    a_maxs = broadcast_to_like(const(a_max), x)
+    zeros = zeros_like(x)
+    ones = ones_like(x)
+    return [where(less(x, a_mins), zeros, where(less(a_maxs, x), zeros, ones * grad))]
+
+@register_gradient("nn.max_pool2d")
+def max_pool2d_grad(orig, grad):
+    attrs = orig.attrs
+    pool_grad = _nn.max_pool2d_grad(grad, orig.args[0], pool_size=attrs.pool_size,
+                                    strides=attrs.strides, padding=attrs.padding,
+                                    layout=attrs.layout, ceil_mode=attrs.ceil_mode)
+    return [pool_grad]
+
+@register_gradient("nn.avg_pool2d")
+def avg_pool2d_grad(orig, grad):
+    attrs = orig.attrs
+    pool_grad = _nn.avg_pool2d_grad(grad, orig.args[0], pool_size=attrs.pool_size,
+                                    strides=attrs.strides, padding=attrs.padding,
+                                    layout=attrs.layout, ceil_mode=attrs.ceil_mode,
+                                    count_include_pad=attrs.count_include_pad)
+    return [pool_grad]
+
+# not implemented, this is only for testing.
+@register_gradient("concatenate")
+def concatenate_grad(orig, grad):
+    assert len(orig.args) == 1
+    t = orig.args[0]
+    x = TupleGetItem(t, 0)
+    y = TupleGetItem(t, 1)
+    # Assume only two element in tuple rn.
+    # In the real implementation, concatenate_grad probably need to be implemented by an operator.
+    return [Tuple([zeros_like(x), zeros_like(y)])]

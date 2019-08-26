@@ -114,6 +114,7 @@ This level enables additional math and transform operators.
    tvm.relay.full
    tvm.relay.full_like
    tvm.relay.cast
+   tvm.relay.reinterpret
    tvm.relay.split
    tvm.relay.arange
    tvm.relay.stack
@@ -149,6 +150,10 @@ This level enables additional math and transform operators.
    tvm.relay.max
    tvm.relay.min
    tvm.relay.mean
+   tvm.relay.variance
+   tvm.relay.std
+   tvm.relay.mean_variance
+   tvm.relay.mean_std
    tvm.relay.prod
    tvm.relay.strided_slice
    tvm.relay.broadcast_to
@@ -186,6 +191,7 @@ This level support backpropagation of broadcast operators. It is temporary.
    tvm.relay.collapse_sum_like
    tvm.relay.slice_like
    tvm.relay.shape_of
+   tvm.relay.contrib.ndarray_size
    tvm.relay.layout_transform
    tvm.relay.device_copy
    tvm.relay.annotation.on_device
@@ -194,6 +200,17 @@ This level support backpropagation of broadcast operators. It is temporary.
    tvm.relay.nn.batch_matmul
    tvm.relay.contrib.adaptive_max_pool2d
    tvm.relay.contrib.adaptive_avg_pool2d
+   tvm.relay.one_hot
+
+
+**Level 11: Dialect Operators**
+
+This level supports dialect operators.
+
+.. autosummary::
+   :nosignatures:
+
+   tvm.relay.qnn.op.requantize
 
 
 Level 1 Definitions
@@ -262,6 +279,7 @@ Level 3 Definitions
 .. autofunction:: tvm.relay.full
 .. autofunction:: tvm.relay.full_like
 .. autofunction:: tvm.relay.cast
+.. autofunction:: tvm.relay.reinterpret
 .. autofunction:: tvm.relay.split
 .. autofunction:: tvm.relay.arange
 .. autofunction:: tvm.relay.stack
@@ -294,6 +312,10 @@ Level 4 Definitions
 .. autofunction:: tvm.relay.max
 .. autofunction:: tvm.relay.min
 .. autofunction:: tvm.relay.mean
+.. autofunction:: tvm.relay.variance
+.. autofunction:: tvm.relay.std
+.. autofunction:: tvm.relay.mean_variance
+.. autofunction:: tvm.relay.mean_std
 .. autofunction:: tvm.relay.prod
 .. autofunction:: tvm.relay.strided_slice
 .. autofunction:: tvm.relay.broadcast_to
@@ -320,6 +342,7 @@ Level 10 Definitions
 .. autofunction:: tvm.relay.collapse_sum_like
 .. autofunction:: tvm.relay.slice_like
 .. autofunction:: tvm.relay.shape_of
+.. autofunction:: tvm.relay.contrib.ndarray_size
 .. autofunction:: tvm.relay.layout_transform
 .. autofunction:: tvm.relay.device_copy
 .. autofunction:: tvm.relay.annotation.on_device
@@ -328,3 +351,9 @@ Level 10 Definitions
 .. autofunction:: tvm.relay.nn.batch_matmul
 .. autofunction:: tvm.relay.contrib.adaptive_max_pool2d
 .. autofunction:: tvm.relay.contrib.adaptive_avg_pool2d
+.. autofunction:: tvm.relay.one_hot
+
+
+Level 11 Definitions
+--------------------
+.. autofunction:: tvm.relay.qnn.op.requantize

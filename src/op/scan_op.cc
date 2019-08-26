@@ -18,7 +18,6 @@
  */
 
 /*!
- *  Copyright (c) 2017 by Contributors
  * \brief Scan Operator.
  * \file scan_op.cc
  */
@@ -84,7 +83,7 @@ Operation ScanOpNode::make(std::string name,
         << "init.shape[0] need to match scan_axis.dom.min";
     CHECK(prove_equal(
         state_placeholder[i]->shape[0], axis->dom->min + axis->dom->extent))
-        << "shate_placeholder.shape[0] need to match"
+        << "state_placeholder.shape[0] need to match"
         << " scan_axis.dom.min + scan_axis.dom.extent";
     CHECK_EQ(state_placeholder[i].ndim(), init[i].ndim())
         << "The dimension of init need to match state_placeholder";
@@ -176,6 +175,7 @@ Operation ScanOpNode::ReplaceInputs(
 
 void ScanOpNode::PropBoundToInputs(
     const Operation& self,
+    arith::Analyzer* analyzer,
     const std::unordered_map<const Variable*, IntSet>& dom_map,
     std::unordered_map<Tensor, TensorDom>* out_dom_map) const {
   CHECK_EQ(self.operator->(), this);
@@ -242,7 +242,7 @@ void ScanOpNode::GatherBound(
       CHECK(fix_pt.count(sp_ax));
       if (fix_pt[sp_ax].as<ir::IntImm>()->value) {
         // fix point, we can slice it.
-        (*out_dom_map)[sp_ax] = arith::Union(d.data[k + 1]).cover_range(sp_ax->dom);
+        (*out_dom_map)[sp_ax] = arith::Union(d.data[k]).cover_range(sp_ax->dom);
       } else {
         // not a fix point, need to include everything.
         (*out_dom_map)[sp_ax] = sp_ax->dom;
@@ -264,7 +264,7 @@ Stmt ScanOpNode::BuildRealize(
   for (size_t i = 0; i < update.size(); ++i) {
     Tensor t = stage->op.output(i);
     CHECK_EQ(static_cast<size_t>(t->value_index), i);
-    HalideIR::Internal::Region bounds;
+    Region bounds;
     bounds.push_back(tdom);
     for (size_t k = 1; k < this->update[i]->shape.size(); ++k, ++sp_idx) {
       IterVar sp_ax = this->spatial_axis_[sp_idx];

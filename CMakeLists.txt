@@ -28,6 +28,7 @@ tvm_option(USE_METAL "Build with Metal" OFF)
 tvm_option(USE_ROCM "Build with ROCM" OFF)
 tvm_option(ROCM_PATH "The path to rocm" /opt/rocm)
 tvm_option(USE_RPC "Build with RPC" ON)
+tvm_option(USE_THREADS "Build with thread support" ON)
 tvm_option(USE_LLVM "Build with LLVM, can be set to specific llvm-config path" OFF)
 tvm_option(USE_STACKVM_RUNTIME "Include stackvm into the runtime" OFF)
 tvm_option(USE_GRAPH_RUNTIME "Build with tiny graph runtime" ON)
@@ -36,6 +37,7 @@ tvm_option(USE_RELAY_DEBUG "Building Relay in debug mode..." OFF)
 tvm_option(USE_SGX "Build with SGX" OFF)
 tvm_option(USE_RTTI "Build with RTTI" ON)
 tvm_option(USE_MSVC_MT "Build with MT" OFF)
+tvm_option(USE_MICRO "Build with Micro" OFF)
 tvm_option(INSTALL_DEV "Install compiler infrastructure" OFF)
 tvm_option(HIDE_PRIVATE_SYMBOLS "Compile with -fvisibility=hidden." OFF)
 
@@ -68,7 +70,6 @@ include_directories(${COMPILER_RT_PATH})
 # initial variables
 set(TVM_LINKER_LIBS "")
 set(TVM_RUNTIME_LINKER_LIBS ${CMAKE_DL_LIBS})
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Generic compilation options
 if(MSVC)
@@ -76,7 +77,6 @@ if(MSVC)
   add_definitions(-D_CRT_SECURE_NO_WARNINGS)
   add_definitions(-D_SCL_SECURE_NO_WARNINGS)
   add_definitions(-D_ENABLE_EXTENDED_ALIGNED_STORAGE)
-  add_definitions(-DHalide_SHARED)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /EHsc")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MP")
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /bigobj")
@@ -112,8 +112,8 @@ else(MSVC)
 endif(MSVC)
 
 # add source group
-FILE(GLOB_RECURSE GROUP_SOURCE "src/*.cc" "3rdparty/HalideIR/src/*.cpp" "nnvm/src/*.cc")
-FILE(GLOB_RECURSE GROUP_INCLUDE "src/*.h" "include/*.h" "3rdparty/HalideIR/src/*.h"
+FILE(GLOB_RECURSE GROUP_SOURCE "src/*.cc" "nnvm/src/*.cc")
+FILE(GLOB_RECURSE GROUP_INCLUDE "src/*.h" "include/*.h"
                                 "nnvm/src/*.h" "nnvm/include/*.h")
 assign_source_group("Source" ${GROUP_SOURCE})
 assign_source_group("Include" ${GROUP_INCLUDE})
@@ -127,13 +127,37 @@ file(GLOB COMPILER_SRCS
     src/lang/*.cc
     src/pass/*.cc
     src/op/*.cc
+    src/node/*.cc
     src/schedule/*.cc
     )
 
-file(GLOB_RECURSE RELAY_SRCS
-    src/relay/*.cc
+file(GLOB_RECURSE RELAY_OP_SRCS
+    src/relay/op/*.cc
     )
-list(APPEND COMPILER_SRCS ${RELAY_SRCS})
+file(GLOB_RECURSE RELAY_PASS_SRCS
+    src/relay/pass/*.cc
+    )
+file(GLOB RELAY_BACKEND_SRCS
+    src/relay/backend/*.cc
+    src/relay/backend/vm/*.cc
+    )
+file(GLOB_RECURSE RELAY_IR_SRCS
+    src/relay/ir/*.cc
+    )
+file(GLOB_RECURSE RELAY_QNN_SRCS
+    src/relay/qnn/*.cc
+)
+list(APPEND COMPILER_SRCS ${RELAY_OP_SRCS})
+list(APPEND COMPILER_SRCS ${RELAY_PASS_SRCS})
+list(APPEND COMPILER_SRCS ${RELAY_BACKEND_SRCS})
+list(APPEND COMPILER_SRCS ${RELAY_IR_SRCS})
+list(APPEND COMPILER_SRCS ${RELAY_QNN_SRCS})
+
+if(USE_VM_PROFILER)
+  message(STATUS "Build compiler with Relay VM profiler support...")
+  file(GLOB BACKEND_VM_PROFILER_SRCS src/relay/backend/vm/profiler/*.cc)
+  list(APPEND COMPILER_SRCS ${BACKEND_VM_PROFILER_SRCS})
+endif(USE_VM_PROFILER)
 
 file(GLOB DATATYPE_SRCS src/codegen/datatype/*.cc)
 list(APPEND COMPILER_SRCS ${DATATYPE_SRCS})
@@ -154,12 +178,7 @@ file(GLOB_RECURSE NNVM_COMPILER_SRCS
 file(GLOB TOPI_SRCS
     topi/src/*.cc
 )
-file(GLOB_RECURSE HALIDEIR_SRCS
-  3rdparty/HalideIR/src/base/*.cpp
-  3rdparty/HalideIR/src/ir/*.cpp
-  3rdparty/HalideIR/src/tvm/*.cpp
-)
-list(APPEND COMPILER_SRCS ${HALIDEIR_SRCS})
+
 file(GLOB RUNTIME_SRCS
   src/runtime/*.cc
   src/runtime/vm/*.cc
@@ -202,6 +221,12 @@ if(USE_GRAPH_RUNTIME)
   endif(USE_GRAPH_RUNTIME_DEBUG)
 endif(USE_GRAPH_RUNTIME)
 
+if(USE_VM_PROFILER)
+  message(STATUS "Build with Relay VM profiler support...")
+  file(GLOB RUNTIME_VM_PROFILER_SRCS src/runtime/vm/profiler/*.cc)
+  list(APPEND RUNTIME_SRCS ${RUNTIME_VM_PROFILER_SRCS})
+endif(USE_VM_PROFILER)
+
 # Module rules
 include(cmake/modules/VTA.cmake)
 include(cmake/modules/CUDA.cmake)
@@ -212,6 +237,7 @@ include(cmake/modules/Metal.cmake)
 include(cmake/modules/ROCM.cmake)
 include(cmake/modules/SGX.cmake)
 include(cmake/modules/LLVM.cmake)
+include(cmake/modules/Micro.cmake)
 include(cmake/modules/ANTLR.cmake)
 include(cmake/modules/contrib/BLAS.cmake)
 include(cmake/modules/contrib/Random.cmake)
@@ -237,6 +263,17 @@ if(NOT USE_SGX STREQUAL "OFF")
 endif()
 add_library(nnvm_compiler SHARED ${NNVM_COMPILER_SRCS})
 
+if(USE_THREADS)
+  message(STATUS "Build with thread support...")
+  set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
+  set(THREADS_PREFER_PTHREAD_FLAG TRUE)
+  find_package(Threads REQUIRED)
+  target_link_libraries(tvm Threads::Threads)
+  target_link_libraries(tvm_topi Threads::Threads)
+  target_link_libraries(tvm_runtime Threads::Threads)
+  target_link_libraries(nnvm_compiler Threads::Threads)
+endif(USE_THREADS)
+
 target_link_libraries(tvm ${TVM_LINKER_LIBS} ${TVM_RUNTIME_LINKER_LIBS})
 target_link_libraries(tvm_topi tvm ${TVM_LINKER_LIBS} ${TVM_RUNTIME_LINKER_LIBS})
 target_link_libraries(tvm_runtime ${TVM_RUNTIME_LINKER_LIBS})
@@ -245,7 +282,6 @@ target_link_libraries(nnvm_compiler tvm)
 # Related headers
 target_include_directories(
   tvm
-  PUBLIC "3rdparty/HalideIR/src"
   PUBLIC "topi/include")
 target_include_directories(
   tvm_topi
@@ -258,20 +294,31 @@ target_include_directories(
 # Tests
 set(TEST_EXECS "")
 file(GLOB TEST_SRCS tests/cpp/*.cc)
+find_path(GTEST_INCLUDE_DIR gtest/gtest.h)
 find_library(GTEST_LIB gtest "$ENV{GTEST_LIB}")
 
-if(GTEST_LIB)
+# Create the `cpptest` target if we can find GTest.  If not, we create dummy
+# targets that give the user an informative error message.
+if(GTEST_INCLUDE_DIR AND GTEST_LIB)
   foreach(__srcpath ${TEST_SRCS})
     get_filename_component(__srcname ${__srcpath} NAME)
     string(REPLACE ".cc" "" __execname ${__srcname})
     add_executable(${__execname} ${__srcpath})
     list(APPEND TEST_EXECS ${__execname})
-    target_link_libraries(${__execname}
-      tvm ${GTEST_LIB} pthread dl)
+    target_include_directories(${__execname} PUBLIC ${GTEST_INCLUDE_DIR})
+    target_link_libraries(${__execname} tvm ${GTEST_LIB} pthread dl)
     set_target_properties(${__execname} PROPERTIES EXCLUDE_FROM_ALL 1)
     set_target_properties(${__execname} PROPERTIES EXCLUDE_FROM_DEFAULT_BUILD 1)
   endforeach()
   add_custom_target(cpptest DEPENDS ${TEST_EXECS})
+elseif(NOT GTEST_INCLUDE_DIR)
+  add_custom_target(cpptest
+      COMMAND echo "Missing Google Test headers in include path"
+      COMMAND exit 1)
+elseif(NOT GTEST_LIB)
+  add_custom_target(cpptest
+      COMMAND echo "Missing Google Test library"
+      COMMAND exit 1)
 endif()
 
 # Custom targets
@@ -295,11 +342,6 @@ if (INSTALL_DEV)
     PATTERN "*.h"
   )
   install(
-    DIRECTORY "3rdparty/HalideIR/src/." DESTINATION "include/HalideIR"
-    FILES_MATCHING
-    PATTERN "*.h"
-  )
-  install(
     DIRECTORY "3rdparty/dlpack/include/." DESTINATION "include"
     FILES_MATCHING
     PATTERN "*.h"
@@ -319,8 +361,6 @@ endif(INSTALL_DEV)
 
 # More target definitions
 if(MSVC)
-  target_compile_definitions(tvm PRIVATE -DHalide_EXPORTS)
-  target_compile_definitions(tvm_runtime PRIVATE -DHalide_EXPORTS)
   target_compile_definitions(tvm PRIVATE -DTVM_EXPORTS)
   target_compile_definitions(tvm_runtime PRIVATE -DTVM_EXPORTS)
   target_compile_definitions(nnvm_compiler PRIVATE -DNNVM_EXPORTS)

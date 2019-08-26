@@ -31,9 +31,12 @@
 #include <tvm/data_layout.h>
 #include <tvm/relay/op.h>
 #include <tvm/relay/expr.h>
+#include <tvm/relay/analysis.h>
 #include <tvm/relay/attrs/nn.h>
 #include <tvm/relay/attrs/transform.h>
+#include <tvm/relay/attrs/reduce.h>
 #include <string>
+#include <utility>
 
 
 namespace tvm {
@@ -373,13 +376,52 @@ inline Expr Copy(Expr data) {
 }
 
 
+inline Expr Mean(Expr data, Array<Integer> axis, bool keepdims, bool exclude) {
+  auto attrs = make_node<ReduceAttrs>();
+  attrs->axis = std::move(axis);
+  attrs->keepdims = keepdims;
+  attrs->exclude = exclude;
+  static const Op& op = Op::Get("mean");
+  return CallNode::make(op, {data}, Attrs(attrs), {});
+}
+
+inline Expr Variance(Expr data, Expr mean, Array<Integer> axis, bool keepdims, bool exclude) {
+  auto attrs = make_node<ReduceAttrs>();
+  attrs->axis = std::move(axis);
+  attrs->keepdims = keepdims;
+  attrs->exclude = exclude;
+  static const Op& op = Op::Get("variance");
+  return CallNode::make(op, {data, mean}, Attrs(attrs), {});
+}
+
+
+static inline Expr Where(const Expr& condition, const Expr& x, const Expr& y) {
+  static const Op& op = Op::Get("where");
+  return CallNode::make(op, {condition, x, y});
+}
+
+static inline Expr GreaterEqual(const Expr& lhs, const Expr& rhs) {
+  static const Op& op = Op::Get("greater_equal");
+  return CallNode::make(op, {lhs, rhs}, Attrs(), {});
+}
+
+static inline Expr Full(Expr fill_value,
+                        Array<IndexExpr> shape,
+                        DataType dtype) {
+  auto attrs = make_node<InitOpAttrs>();
+  attrs->shape = std::move(shape);
+  attrs->dtype = std::move(dtype);
+  static const Op& op = Op::Get("full");
+  return CallNode::make(op, {fill_value}, Attrs(attrs), {});
+}
+
 Expr MakeConcatenate(Expr data, int axis);
 
 Expr MakeStridedSlice(Expr data, Array<Integer> begin, Array<Integer> end, Array<Integer> strides);
 
 Expr StopFusion(Expr data);
 
-Expr ForceCast(Expr data);
+Expr CastHint(Expr data, DataType dtype);
 
 }  // namespace relay
 }  // namespace tvm

@@ -196,7 +196,7 @@ int32_t Layout::FactorOf(const LayoutAxis& axis) const {
 }
 
 TVM_STATIC_IR_FUNCTOR(IRPrinter, vtable)
-.set_dispatch<LayoutNode>([](const LayoutNode *l, IRPrinter *p) {
+.set_dispatch<LayoutNode>([](const LayoutNode* l, IRPrinter* p) {
     p->stream << "Layout(" << l->name << ")";
   });
 
@@ -350,5 +350,11 @@ BijectiveLayout BijectiveLayoutNode::make(const Layout& src_layout,
 
   return BijectiveLayout(n);
 }
+
+TVM_STATIC_IR_FUNCTOR(IRPrinter, vtable)
+.set_dispatch<BijectiveLayoutNode>([](const BijectiveLayoutNode* b, IRPrinter* p) {
+    p->stream << "BijectiveLayout(" << b->src_layout.name()
+              << "->" << b->dst_layout.name() << ")";
+  });
 
 }  // namespace tvm

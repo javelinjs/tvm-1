@@ -25,6 +25,7 @@
  * ExprMutator uses memoization and self return in order to amortize
  * the cost of using functional updates.
  */
+#include <tvm/relay/analysis.h>
 #include <tvm/relay/expr_functor.h>
 #include <tvm/relay/pattern_functor.h>
 #include "type_functor.h"
@@ -211,11 +212,12 @@ Expr ExprMutator::VisitExpr_(const MatchNode* m) {
   for (const Clause& p : m->clauses) {
     clauses.push_back(VisitClause(p));
   }
-  return MatchNode::make(VisitExpr(m->data), clauses);
+  return MatchNode::make(VisitExpr(m->data), clauses, m->complete);
 }
 
 Clause ExprMutator::VisitClause(const Clause& c) {
-  return ClauseNode::make(VisitPattern(c->lhs), VisitExpr(c->rhs));
+  Pattern p = VisitPattern(c->lhs);
+  return ClauseNode::make(p, VisitExpr(c->rhs));
 }
 
 Pattern ExprMutator::VisitPattern(const Pattern& p) { return p; }
@@ -394,7 +396,9 @@ class ExprBinder : public ExprMutator, PatternMutator {
   }
 
   Var VisitVar(const Var& v) final {
-    return Downcast<Var>(VisitExpr(v));
+    CHECK(!args_map_.count(v))
+      << "Cannnot bind an internal pattern variable";
+    return v;
   }
 
  private:
@@ -414,11 +418,27 @@ Expr Bind(const Expr& expr, const tvm::Map<Var, Expr>& args_map) {
         new_params.size() == func->params.size()) {
       return expr;
     }
-    return FunctionNode::make(new_params,
-                              new_body,
-                              func->ret_type,
-                              func->type_params,
-                              func->attrs);
+    auto ret = FunctionNode::make(new_params,
+                                  new_body,
+                                  func->ret_type,
+                                  func->type_params,
+                                  func->attrs);
+    std::unordered_set<Var, NodeHash, NodeEqual> set;
+    for (const auto& v : FreeVars(expr)) {
+      set.insert(v);
+    }
+    for (const auto& v : FreeVars(ret)) {
+      if (set.count(v) == 0) {
+        new_params.push_back(v);
+      }
+    }
+    ret = FunctionNode::make(new_params,
+                             new_body,
+                             func->ret_type,
+                             func->type_params,
+                             func->attrs);
+    CHECK_EQ(FreeVars(expr).size(), FreeVars(ret).size());
+    return std::move(ret);
   } else {
     return ExprBinder(args_map).VisitExpr(expr);
   }

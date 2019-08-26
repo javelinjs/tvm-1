@@ -18,7 +18,6 @@
  */
 
 /*!
- *  Copyright (c) 2017 by Contributors
  * \file message_passing.cc
  * \brief The message passing domain.
  */
@@ -32,12 +31,11 @@ namespace tvm {
 namespace schedule {
 
 using namespace ir;
-using namespace arith;
 
 void Update(std::unordered_map<IterVar, Range>* p_state,
             const IterVar& iv,
             Range r,
-            Analyzer* analyzer) {
+            arith::Analyzer* analyzer) {
   auto it = p_state->find(iv);
   if (it == p_state->end()) {
     (*p_state)[iv] = r;
@@ -145,8 +143,8 @@ void PassUpIndex(const Stage& stage,
       Expr factor = dom_map.at(s->inner)->extent;
       Expr outer_min = dom_map.at(s->outer)->min;
       Expr inner_min = dom_map.at(s->inner)->min;
-      state[s->outer] = ComputeExpr<Div>(value, factor);
-      state[s->inner] = ComputeExpr<Mod>(value, factor);
+      state[s->outer] = value / factor;
+      state[s->inner] = value % factor;
       // add min if they exist
       if (!is_zero(outer_min)) {
         state[s->outer] = state[s->outer] + outer_min;
@@ -189,8 +187,8 @@ void PassDownIndex(const Stage& stage,
       CHECK(is_zero(r->min));
       Expr parent = state.at(s->parent);
       Expr factor = r->extent;
-      state[s->outer] = ComputeExpr<Div>(parent, factor);
-      state[s->inner] = ComputeExpr<Mod>(parent, factor);
+      state[s->outer] = parent / factor;
+      state[s->inner] = parent % factor;
     } else if (const FuseNode* s = rel.as<FuseNode>()) {
       if (!state.count(s->inner) && !state.count(s->outer)) {
         CHECK(allow_missing);
@@ -240,7 +238,7 @@ void PassUpDomain(const SplitNode* s,
   CHECK(outer.defined());
   CHECK(inner.defined());
   CHECK(factor.defined());
-  *parent = EvalSet(
+  *parent = arith::EvalSet(
       s->outer->var * factor + s->inner->var + parent_min,
       {{s->outer, outer}, {s->inner, inner}});
 }
@@ -272,10 +270,24 @@ void PassUpDomain(const FuseNode* s,
     *outer = IntSet::single_point(v_outer);
     *inner = IntSet::single_point(v_inner);
   } else {
-    LOG(WARNING) << "use fallback inference rule in fuse";
-    // simply use the entire set, this rule can be enhanced.
-    *outer = IntSet::range(dom_map.at(s->outer));
-    *inner = IntSet::range(dom_map.at(s->inner));
+    Expr fused_extent = (fused.max() - fused.min() + 1);
+    Expr inner_extent = dom_map.at(s->inner)->extent;
+    *outer = IntSet::interval(outer_min + fused.min() / inner_extent,
+            outer_min + fused.max() / inner_extent);
+    if (is_zero(Simplify(inner_extent % fused_extent)) &&
+      is_zero(Simplify(fused.min() % fused_extent)) ) {
+      // fused never spans multiple rows, make a tight bounding box
+      // there may be other cases when bounding box could be tightened
+      *inner = IntSet::interval(inner_min + fused.min() % inner_extent,
+                                inner_min + fused.max() % inner_extent);
+    } else {  // fused may span multiple rows, use full row widths
+      if (!is_zero(Simplify(fused_extent % inner_extent)) ||
+        !is_zero(Simplify(fused.min() % inner_extent))) {
+        LOG(WARNING) <<
+          "fused and original axes are not aligned, this may cause redundant computations";
+      }
+      *inner = IntSet::range(dom_map.at(s->inner));
+    }
     return;
   }
 }
@@ -290,8 +302,8 @@ void PassUpDomain(const RebaseNode* s,
     return;
   }
   Expr parent_min = dom_map.at(s->parent)->min;
-  *parent = EvalSet(s->rebased->var + parent_min,
-                    {{s->rebased, rebased}});
+  *parent = arith::EvalSet(s->rebased->var + parent_min,
+                           {{s->rebased, rebased}});
 }
 
 void PassUpDomain(const Stage& stage,
@@ -476,7 +488,7 @@ std::vector<Expr> MakeBoundCheck(
     const std::unordered_map<IterVar, Expr>& value_map,
     bool skip_ivar_domain,
     const std::unordered_set<IterVar>& skip_iter) {
-  Analyzer analyzer;
+  arith::Analyzer analyzer;
 
   std::unordered_map<IterVar, bool> bound_state;
   for (IterVar iv : stage->leaf_iter_vars) {
@@ -496,7 +508,7 @@ std::vector<Expr> MakeBoundCheck(
     if (skip_iter.count(iv) || iv->iter_type == kOpaque) continue;
     if (bound_state.at(iv)) {
       Range dom = dom_map.at(iv);
-      Expr value = ComputeExpr<Sub>(value_map.at(iv), dom->min);
+      Expr value = value_map.at(iv) - dom->min;
       Expr vmax = EvalSet(value, iset_dmap).max();
       if (vmax.type() != value.type() || !analyzer.CanProve(vmax < dom->extent)) {
         preds.emplace_back(value < dom->extent);
@@ -508,7 +520,7 @@ std::vector<Expr> MakeBoundCheck(
     Range dom = dom_map.at(iv);
     CHECK(iv->dom.defined());
     if (!skip_ivar_domain && !iv->dom.same_as(dom)) {
-      Expr value = ComputeExpr<Sub>(value_map.at(iv), iv->dom->min);
+      Expr value = value_map.at(iv) - iv->dom->min;
       IntSet s = EvalSet(value, iset_dmap);
       Expr vmin = s.min();
       Expr vmax = s.max();

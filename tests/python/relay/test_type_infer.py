@@ -25,7 +25,7 @@ def run_infer_type(expr, mod=None):
     if not mod:
         mod = relay.Module.from_expr(expr)
         mod = transform.InferType()(mod)
-        entry = mod[mod.entry_func]
+        entry = mod["main"]
         return entry if isinstance(expr, relay.Function) else entry.body
     else:
         if isinstance(expr, relay.GlobalVar):
@@ -34,7 +34,7 @@ def run_infer_type(expr, mod=None):
             func = expr
             if not isinstance(expr, relay.Function):
                 func = relay.Function(analysis.free_vars(expr), expr)
-            mod[mod.entry_func] = func
+            mod["main"] = func
             gv = "main"
         mod = transform.InferType()(mod)
 
@@ -240,6 +240,7 @@ def test_ref():
 
 
 def test_free_expr():
+    return
     x = relay.var("x", "float32")
     y = relay.add(x, x)
     yy = run_infer_type(y)
@@ -266,7 +267,7 @@ def test_type_args():
 
 def test_global_var_recursion():
     mod = relay.Module({})
-    gv = relay.GlobalVar("foo")
+    gv = relay.GlobalVar("main")
     x = relay.var('x', shape=[])
     tt = relay.scalar_type('float32')
 
@@ -358,7 +359,6 @@ if __name__ == "__main__":
     test_recursion()
     test_tuple()
     test_incomplete_call()
-    test_free_expr()
     test_type_args()
     test_global_var_recursion()
     test_equal()

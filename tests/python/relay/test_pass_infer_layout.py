@@ -26,7 +26,7 @@ def run_infer_layout(expr, in_layouts=[]):
     expr = relay.Function(analysis.free_vars(expr), expr)
     mod = relay.Module.from_expr(expr)
     mod = transform.InferType()(mod)
-    f = mod[mod.entry_func]
+    f = mod["main"]
     f = f if isinstance(f, relay.Function) else f.body
     in_layouts_map = {}
     for i in range(len(in_layouts)):

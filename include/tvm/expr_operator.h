@@ -24,6 +24,7 @@
  * \note Most of the operator defined here perform simple constant folding
  *   when the type is int32 or int64 for simplifying the index expressions.
  */
+// Acknowledgement: Most operator APIs originate from Halide.
 #ifndef TVM_EXPR_OPERATOR_H_
 #define TVM_EXPR_OPERATOR_H_
 
@@ -332,6 +333,26 @@ TVM_DLL Expr operator||(Expr a, Expr b);
  */
 TVM_DLL Expr operator!(Expr a);
 /*!
+ * \brief compute floor(a / b)
+ *
+ * \param a left operand
+ * \param b right operand
+ * \return The result expression.
+ * \note this function does eager constant folding for
+ *       index types(int32, int64) when possible.
+ */
+TVM_DLL Expr floordiv(Expr a, Expr b);
+/*!
+ * \brief compute the remainder of floordiv
+ *
+ * \param a left operand
+ * \param b right operand
+ * \return The result expression.
+ * \note this function does eager constant folding for
+ *       index types(int32, int64) when possible.
+ */
+TVM_DLL Expr floormod(Expr a, Expr b);
+/*!
  * \brief take maximum of two values
  *
  * \param a left operand
@@ -497,7 +518,8 @@ TVM_DECLARE_INTRIN_UNARY(sqrt);
 TVM_DECLARE_INTRIN_UNARY(rsqrt);
 TVM_DECLARE_INTRIN_UNARY(log);
 TVM_DECLARE_INTRIN_UNARY(popcount);
-
+TVM_DECLARE_INTRIN_UNARY(cos);
+TVM_DECLARE_INTRIN_UNARY(sin);
 
 // Implementation details after this
 inline bool is_const(const Expr& x) {

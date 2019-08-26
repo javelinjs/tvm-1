@@ -17,7 +17,7 @@
 """Transform operators."""
 
 from . import _make
-from ..expr import TupleWrapper
+from ..expr import TupleWrapper, const
 
 
 def cast(data, dtype):
@@ -38,6 +38,26 @@ def cast(data, dtype):
     """
     from .. import _make as _relay_make
     return _relay_make.cast(data, dtype)
+
+
+def reinterpret(data, dtype):
+    """Reinterpret input tensor to data type.
+
+    Parameters
+    ----------
+    data : relay.Expr
+        The input data to the operator.
+
+    dtype: str
+        The target data type
+
+    Returns
+    -------
+    result : relay.Expr
+        The reinterpreted result.
+    """
+    from .. import _make as _relay_make
+    return _relay_make.reinterpret(data, dtype)
 
 
 def expand_dims(data, axis, num_newaxis=1):
@@ -272,7 +292,7 @@ def full_like(data, fill_value):
     return _make.full_like(data, fill_value)
 
 
-def arange(start, stop=None, step=1, dtype="float32"):
+def arange(start, stop=None, step=None, dtype="float32"):
     """Return evenly spaced values within a given interval.
 
     .. note::
@@ -310,9 +330,13 @@ def arange(start, stop=None, step=1, dtype="float32"):
         relay.arange(1, 5) = [1, 2, 3, 4]
         relay.arange(1, 5, 1.5) = [1, 2.5, 4]
     """
+    if step is None:
+        step = const(1, dtype)
+
     if stop is None:
         stop = start
-        start = 0
+        start = const(0, dtype=dtype)
+
     return _make.arange(start, stop, step, dtype)
 
 
@@ -724,3 +748,47 @@ def sequence_mask(data, valid_length, mask_value=0, axis=0):
              [[  0.1,  0.1,  0.1], [  16.,  17.,  18.]]]
     """
     return _make.sequence_mask(data, valid_length, mask_value, axis)
+
+def one_hot(indices, on_value, off_value, depth, axis, dtype):
+    """
+    Returns a one-hot tensor where the locations repsented by indices take value on_value,
+    other locations take value off_value.
+    Final dimension is <indices outer dimensions> x depth x <indices inner dimensions>.
+
+    Parameters
+    ----------
+    indices : relay.Expr
+        Locations to set to on_value.
+
+    on_value : relay.Expr
+        Value to fill at indices.
+
+    off_value : relay.Expr
+        Value to fill at all other positions besides indices.
+
+    depth : int
+        Depth of the one-hot dimension.
+
+    axis : int
+        Axis to fill.
+
+    dtype : str
+        Data type of the output tensor.
+
+    Returns
+    -------
+    ret : relay.Expr
+        The one-hot tensor.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        indices = [0, 1, 2]
+
+        relay.one_hot(indices, 3) =
+            [[1, 0, 0],
+             [0, 1, 0],
+             [0, 0, 1]]
+    """
+    return _make.one_hot(indices, on_value, off_value, depth, axis, dtype)

@@ -42,7 +42,7 @@ def _make_dense_block(data, num_layers, bn_size, growth_rate, index):
     layer_out = data
     for i in range(num_layers):
         layer_out = _make_dense_layer(layer_out, growth_rate, bn_size,
-                                      "(%s, %s)" % (index, i))
+                                      "%s_%s" % (index, i))
     return layer_out
 
 def _make_transition(data, num_output_features, index):
@@ -105,8 +105,8 @@ def get_workload(densenet_size=121, classes=1000, batch_size=4,
 
     Returns
     -------
-    net: relay.Function
-        The computation graph representing densenet.
+    mod: tvm.relay.Module
+        The relay module that contains a DenseNet network.
 
     params : dict of str to NDArray
         The benchmark paraeters.

@@ -62,6 +62,9 @@ set(USE_VULKAN OFF)
 # Whether enable OpenGL runtime
 set(USE_OPENGL OFF)
 
+# Whether enable MicroTVM runtime
+set(USE_MICRO OFF)
+
 # Whether to enable SGX runtime
 #
 # Possible values for USE_SGX:
@@ -84,6 +87,9 @@ set(USE_GRAPH_RUNTIME ON)
 
 # Whether enable additional graph debug functions
 set(USE_GRAPH_RUNTIME_DEBUG OFF)
+
+# Whether enable additional vm profiler functions
+set(USE_VM_PROFILER OFF)
 
 # Whether build with LLVM support
 # Requires LLVM version >= 4.0
@@ -135,3 +141,11 @@ set(USE_ANTLR OFF)
 # Whether use Relay debug mode
 set(USE_RELAY_DEBUG OFF)
 
+# Whether to build fast VTA simulator driver
+set(USE_VTA_FSIM ON)
+
+# Whether to build cycle-accurate VTA simulator driver
+set(USE_VTA_TSIM ON)
+
+# Whether to build VTA FPGA driver (device side only)
+set(USE_VTA_FPGA OFF)
