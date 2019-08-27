@@ -75,5 +75,11 @@ void LayoutReporterNode::Assign(size_t index, const RelayLayout& layout) {
   this->results.Set(this->args[index], layout);
 }
 
+TVM_REGISTER_API("relay._make.TensorLayout")
+.set_body_typed(TensorLayoutNode::make);
+
+TVM_REGISTER_API("relay._make.TupleLayout")
+.set_body_typed(TupleLayoutNode::make);
+
 }  // namespace relay
 }  // namespace tvm

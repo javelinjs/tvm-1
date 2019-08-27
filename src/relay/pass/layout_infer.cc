@@ -55,16 +55,7 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
  public:
   LayoutInferencer() : modified_(false), timestamp_(0) {}
 
-  explicit LayoutInferencer(Map<Expr, Array<Layout> >& in_layouts) {
-    for (auto it : in_layouts) {
-      CHECK_GT(it.second.size(), 0);
-      if (it.second.size() == 1) {
-        layout_map_.Set(it.first, TensorLayoutNode::make(it.second[0]));
-      } else {
-        layout_map_.Set(it.first, TupleLayoutNode::make(it.second));
-      }
-    }
-  }
+  explicit LayoutInferencer(Map<Expr, RelayLayout>& in_layouts) : layout_map_(in_layouts) {}
 
   // inference the type of expr.
   Expr Infer(Expr expr) {
@@ -95,7 +86,7 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
  private:
   // map from expression to checked type
   // type inferencer will populate it up
-//  std::unordered_map<Expr, RelayLayout, NodeHash, NodeEqual> layout_map_;
+  // std::unordered_map<Expr, RelayLayout, NodeHash, NodeEqual> layout_map_;
   Map<Expr, RelayLayout> layout_map_;
   std::unordered_map<Expr, int, NodeHash, NodeEqual> layout_timestamp_;
   bool modified_;
@@ -236,14 +227,19 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
 //  return LayoutInferencer().Infer(expr);
 //}
 
-Map<Expr, Array<Layout> > CollectLayoutInfo(const Expr& expr) {// Map<Expr, Array<Layout> > in_layouts) {
-  LayoutInferencer inferencer;
+Map<Expr, Array<Layout> > CollectLayoutInfo(const Expr& expr, Map<Expr, RelayLayout> in_layouts) {
+  LayoutInferencer inferencer(in_layouts);
   inferencer.Infer(expr);
   return inferencer.CollectLayoutInfo();
 }
 
+//TVM_REGISTER_API("relay._analysis.CollectLayoutInfo")
+//.set_body_typed(CollectLayoutInfo);
+
 TVM_REGISTER_API("relay._analysis.CollectLayoutInfo")
-.set_body_typed(CollectLayoutInfo);
+.set_body([](TVMArgs args, TVMRetValue *ret) {
+    *ret = CollectLayoutInfo(args[0].operator Expr(), args[1].operator Map<Expr, RelayLayout>());
+  });
 
 //namespace transform {
 

@@ -20,10 +20,13 @@
 This file contains the set of passes for Relay, which exposes an interface for
 configuring the passes and scripting them in Python.
 """
+from ..api import layout as _create_tvm_layout
+from ..tensor import Layout
 from . import _analysis
 from . import _make
 from .expr import Expr
 from .ty import Type
+from .la import TensorLayout, TupleLayout
 from .module import Module
 from .feature import Feature
 
@@ -328,7 +331,17 @@ def collect_device_annotation_ops(expr):
 
 
 def collect_layout(expr, in_layouts = {}):
-    return _analysis.CollectLayoutInfo(expr)#, in_layouts)
+    layout_map = {}
+    for key, value in in_layouts.items():
+        if isinstance(value, Layout):
+            layout_map[key] = TensorLayout(value)
+        elif isinstance(value, list):
+            layout_map[key] = TupleLayout(value)
+        elif isinstance(value, str):
+            layout_map[key] = TensorLayout(_create_tvm_layout(value))
+        else:
+            raise TypeError("Unknown value " + str(value))
+    return _analysis.CollectLayoutInfo(expr, layout_map)
 
 
 def get_total_mac_number(expr):

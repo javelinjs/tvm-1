@@ -21,6 +21,10 @@ from tvm import relay
 from tvm.relay import transform, analysis
 from tvm.relay.analysis import collect_layout
 
+def print_dict(layouts):
+    for k, v in layouts.items():
+        print(k, "|:", v)
+        print()
 
 def run_infer_layout(expr, in_layouts=[]):
     expr = relay.Function(analysis.free_vars(expr), expr)
@@ -31,7 +35,7 @@ def run_infer_layout(expr, in_layouts=[]):
     in_layouts_map = {}
     for i in range(len(in_layouts)):
         in_layouts_map[f.params[i]] = in_layouts[i]
-    layout_map = collect_layout(f) #, in_layouts_map)
+    layout_map = collect_layout(f, in_layouts_map)
     return layout_map
 
 
@@ -39,7 +43,7 @@ def test_unary():
     x = relay.var('x', shape=(2, 2))
     y = relay.nn.relu(x)
     layouts = run_infer_layout(y, [tvm.layout("NCHW")])
-    print(layouts)
+    print_dict(layouts)
 
 
 def test_broadcast():
@@ -84,12 +88,27 @@ def test_reverse_infer():
     x = relay.nn.relu(x)
     weight = relay.var("weight")
     y = relay.nn.conv2d(x, weight, channels=64, kernel_size=(3, 3), padding=(1, 1))
-    layouts = run_infer_layout(y)
-    print("layouts", layouts)
+    layouts = run_infer_layout(y)#, in_layouts=[tvm.layout("NCHW")])
+    print_dict(layouts)
+
+
+def test_given_input_layouts():
+    x = relay.var('x', shape=(1, 64, 56, 56))
+    x = relay.nn.relu(x)
+    y = relay.var("y", shape=(1, 1, 56, 56))
+    z = x + y
+    layouts = run_infer_layout(z, in_layouts=[tvm.layout("NCHW")])
+    print_dict(layouts)
 
 
 if __name__ == "__main__":
+    from tvm.relay.la import TensorLayout, TupleLayout
+    # a = TensorLayout(tvm.layout("NCHW"))
+    # print("A = ", a)
+    b = TupleLayout(["NCHW", "OIHW"])
+    print("B = ", b)
     # test_unary()
     # test_broadcast()
     # test_conv2d()
-    test_reverse_infer()
+    # test_reverse_infer()
+    test_given_input_layouts()
