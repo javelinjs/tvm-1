@@ -96,12 +96,13 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
     auto it = layout_map_.find(expr);
     if (it == layout_map_.end() || layout_timestamp_[expr] < timestamp_) {
       auto layout = this->VisitExpr(expr);
-      layout_map_.Set(expr, layout);
+      layout_timestamp_[expr] = timestamp_;
+      UpdateLayoutCache(expr, layout);
     }
     return layout_map_[expr];
   }
 
-  RelayLayout GetCachedLayout(const Expr& expr, const Layout& default_layout = Layout::Undef()) {
+  RelayLayout MakeLayoutIfNotExist(const Expr& expr, const Layout& default_layout = Layout::Undef()) {
     if (layout_map_.count(expr)) {
       return layout_map_[expr];
     }
@@ -113,8 +114,7 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
     } else {
       olayout = TupleLayoutNode::make(Array<Layout>(num_outputs, default_layout));
     }
-    modified_ = true;
-    layout_map_.Set(expr, olayout);
+    UpdateLayoutCache(expr, olayout);
     return olayout;
   }
 
@@ -133,7 +133,7 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
 
   // Visitor Logic
   RelayLayout VisitExpr_(const VarNode* op) final {
-    return GetCachedLayout(GetRef<Var>(op));
+    return MakeLayoutIfNotExist(GetRef<Var>(op));
   }
 
   RelayLayout VisitExpr_(const GlobalVarNode* op) final {
@@ -178,7 +178,7 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
       nodes.push_back(arg);
     }
 
-    layouts.push_back(GetCachedLayout(node));
+    layouts.push_back(MakeLayoutIfNotExist(node));
     types.push_back(call->checked_type());
     nodes.push_back(GetRef<Call>(call));
 
@@ -192,8 +192,8 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
         UpdateLayoutCache(reporter);
       }
     }
-    layout_timestamp_[node] = timestamp_;
-    return GetCachedLayout(node);
+    CHECK(layout_map_.count(node));
+    return layout_map_[node];
   }
 
   RelayLayout VisitExpr_(const FunctionNode* f) final {
