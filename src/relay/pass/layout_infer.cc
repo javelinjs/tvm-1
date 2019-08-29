@@ -74,10 +74,11 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
       auto layout = iter.second;
       if (auto* tensor_layout = layout.as<TensorLayoutNode>()) {
         map.Set(iter.first, Array<Layout>({tensor_layout->layout}));
-      } else {
-        auto* tuple_layout = layout.as<TupleLayoutNode>();
+      } else if (auto* tuple_layout = layout.as<TupleLayoutNode>()) {
         CHECK(tuple_layout);
         map.Set(iter.first, tuple_layout->fields);
+      } else {
+        CHECK(false) << "TODO: FuncLayoutNode";
       }
     }
     return map;
@@ -197,8 +198,12 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
   }
 
   RelayLayout VisitExpr_(const FunctionNode* f) final {
-    // TODO: params
-    return this->VisitExpr(f->body);
+    Array<RelayLayout> arg_layouts;
+    for (auto param : f->params) {
+      arg_layouts.push_back(GetLayout(param));
+    }
+    auto rlayout = GetLayout(f->body);
+    return FuncLayoutNode::make(arg_layouts, rlayout);
   }
 
   RelayLayout VisitExpr_(const MatchNode* op) final {

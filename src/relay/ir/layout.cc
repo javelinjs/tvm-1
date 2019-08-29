@@ -39,6 +39,13 @@ TupleLayout TupleLayoutNode::make(Array<Layout> fields) {
   return TupleLayout(n);
 }
 
+FuncLayout FuncLayoutNode::make(Array<RelayLayout> arg_layouts, RelayLayout ret_layout) {
+  NodePtr<FuncLayoutNode> n = make_node<FuncLayoutNode>();
+  n->arg_layouts = std::move(arg_layouts);
+  n->ret_layout = std::move(ret_layout);
+  return FuncLayout(n);
+}
+
 LayoutReporter LayoutReporterNode::make(Array<Expr> args, Array<RelayLayout> args_layout) {
   NodePtr<LayoutReporterNode> n = make_node<LayoutReporterNode>();
   n->args = std::move(args);
@@ -66,6 +73,8 @@ bool RelayLayout::Equals(const RelayLayout &rhs) const {
       return true;
     }
   }
+  const auto* lhs_func_layout = as<TupleLayoutNode>();
+  CHECK(!lhs_func_layout) << "TODO: FuncLayout";
   return false;
 }
 
