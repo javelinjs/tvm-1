@@ -453,6 +453,7 @@ RELAY_REGISTER_OP("nn.relu")
 .set_support_level(1)
 .add_type_rel("Identity", IdentityRel)
 .set_attr<FInferCorrectLayout>("FInferCorrectLayout", ElemwiseArbitraryLayout)
+.set_attr<FInferLayout>("FInferLayout", UnaryInferLayout)
 .set_attr<FTVMCompute>("FTVMCompute", [](const Attrs& attrs,
                                          const Array<Tensor>& inputs,
                                          const Type& out_type,

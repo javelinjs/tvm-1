@@ -242,9 +242,16 @@ TVM_REGISTER_API("_LayoutNdim")
 });
 
 TVM_REGISTER_API("_LayoutGetItem")
-.set_body_typed<std::string(Layout, int)>([](Layout layout, int idx) {
-  const LayoutAxis& axis = layout[idx];
-  return axis.name();
+.set_body_typed<std::string(Layout, int, int, int)>([](
+    Layout layout, int start, int stop, int step) {
+  if (start < 0) start = start + layout.ndim();
+  if (stop < 0) stop = stop + layout.ndim();
+  stop = stop > layout.ndim() ? layout.ndim() : stop;
+  std::stringstream s;
+  for (int i = start; i < stop; i += step) {
+    s << layout[i];
+  }
+  return s.str();
 });
 
 TVM_REGISTER_API("_BijectiveLayout")

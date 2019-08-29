@@ -45,15 +45,15 @@ inline bool UnaryInferLayout(const Array<RelayLayout>& layouts,
   const auto* pin = layouts[0].as<TensorLayoutNode>();
   const auto* pout = layouts[1].as<TensorLayoutNode>();
   CHECK(pin && pout);
-  const Layout in = pin->layout;
+  const auto in = pin->layout;
   const auto out = pout->layout;
   if ((in.defined() && out.defined()) || (!in.defined() && !out.defined())) {
     CHECK(in.Equals(out));
     return false;
   }
   const auto tmp = in.defined() ? in : out;
-  size_t index = in.defined() ? 1 : 0;
-  reporter->Assign(index, TensorLayoutNode::make(tmp));
+  reporter->Assign(0, TensorLayoutNode::make(tmp));
+  reporter->Assign(1, TensorLayoutNode::make(tmp));
   return true;
 }
 

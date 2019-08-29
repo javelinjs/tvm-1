@@ -94,7 +94,7 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
 
   RelayLayout GetLayout(const Expr& expr) {
     auto it = layout_map_.find(expr);
-    if (it == layout_map_.end()) {
+    if (it == layout_map_.end() || layout_timestamp_[expr] < timestamp_) {
       auto layout = this->VisitExpr(expr);
       layout_map_.Set(expr, layout);
     }
@@ -106,7 +106,7 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
       return layout_map_[expr];
     }
     const size_t num_outputs = expr->checked_type()->is_type<TupleTypeNode>() ?
-                           expr->type_as<TupleTypeNode>()->fields.size() : 1;
+                               expr->type_as<TupleTypeNode>()->fields.size() : 1;
     RelayLayout olayout;
     if (num_outputs == 1) {
       olayout = TensorLayoutNode::make(default_layout);
@@ -121,7 +121,6 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
   void UpdateLayoutCache(const Expr& expr, const RelayLayout& layout) {
     if (!layout_map_.count(expr) || !layout_map_[expr].Equals(layout)) {
       layout_map_.Set(expr, layout);
-      layout_timestamp_[expr] = timestamp_;
       modified_ = true;
     }
   }
@@ -193,6 +192,7 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
         UpdateLayoutCache(reporter);
       }
     }
+    layout_timestamp_[node] = timestamp_;
     return GetCachedLayout(node);
   }
 

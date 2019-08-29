@@ -232,9 +232,17 @@ class Layout(NodeBase):
         return len(axis) == 1 and axis[0].isalpha() and axis[0] in self.name
 
     def __getitem__(self, index):
-        if index >= len(self):
-            raise IndexError("Layout index out of range")
-        return _api_internal._LayoutGetItem(self, index)
+        if isinstance(index, slice) :
+            start = index.start if index.start is not None else 0
+            step = index.step if index.step is not None else 1
+            stop = index.stop if index.stop is not None else len(self)
+        elif isinstance(index, int):
+            start = index
+            stop, step = start + 1, 1
+        else:
+            raise TypeError("Invalid argument type")
+
+        return _api_internal._LayoutGetItem(self, start, stop, step)
 
     def index_of(self, axis):
         """Get the index of an axis

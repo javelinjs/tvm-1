@@ -20,11 +20,31 @@ import tvm
 from tvm import relay
 from tvm.relay import transform, analysis
 from tvm.relay.analysis import collect_layout
+from tvm.relay.expr_functor import ExprVisitor
+
+
+class AssertInferredLayout(ExprVisitor):
+    def __init__(self, assert_func):
+        super(AssertInferredLayout, self).__init__()
+        self.assert_func = assert_func
+        self.nodes = []
+
+    def visit_call(self, call):
+        for arg in call.args:
+            self.visit(arg)
+        self.assert_func(call)
+        self.nodes.append(call.op.name)
+
+    def visit_var(self, var):
+        self.assert_func(var)
+        self.nodes.append(var.name_hint)
+
 
 def print_dict(layouts):
     for k, v in layouts.items():
         print(k, "|:", v)
         print()
+
 
 def run_infer_layout(expr, in_layouts=[]):
     expr = relay.Function(analysis.free_vars(expr), expr)
@@ -34,53 +54,56 @@ def run_infer_layout(expr, in_layouts=[]):
     f = f if isinstance(f, relay.Function) else f.body
     in_layouts_map = {}
     for i in range(len(in_layouts)):
-        in_layouts_map[f.params[i]] = in_layouts[i]
+        in_layout = tvm.layout(in_layouts[i]) \
+            if isinstance(in_layouts[i], str) else in_layouts[i]
+        in_layouts_map[f.params[i]] = in_layout
     layout_map = collect_layout(f, in_layouts_map)
-    return layout_map
+    return f, layout_map
 
 
-def test_unary():
-    x = relay.var('x', shape=(2, 2))
-    y = relay.nn.relu(x)
-    layouts = run_infer_layout(y, [tvm.layout("NCHW")])
-    print_dict(layouts)
-
-
-def test_broadcast():
+def test_relu():
     x = relay.var('x', shape=(1, 64, 56, 56))
+    x = relay.nn.relu(x)
+    y = relay.var("y", shape=(1, 1, 56, 56))
+    z = x + y
+    f, layouts = run_infer_layout(z, in_layouts=[tvm.layout("NCHW")])
+    # check results
+    def assert_func(node):
+        node_layout = layouts[node]
+        assert len(node_layout) == 1
+        assert node_layout[0][:] == "NCHW"
+    checker = AssertInferredLayout(assert_func)
+    checker.visit(f)
+    assert set(checker.nodes) == set(["x", "y", "nn.relu", "add"]), checker.nodes
+
+
+def test_conv2d_broadcast():
+    x = relay.var("x", shape=(1, 64, 56, 56))
     weight = relay.var("weight")
     y = relay.nn.conv2d(x, weight, channels=64, kernel_size=(3, 3), padding=(1, 1))
 
-    bias = relay.var("bias", shape=(56,))
+    bias = relay.var("bias", shape=(64, 1, 1))
     z = relay.add(y, bias)
-    z = relay.Function(analysis.free_vars(z), z)
+    f, layouts = run_infer_layout(z, in_layouts=["NCHW"])
 
-    mod = relay.Module.from_expr(z)
-    mod = transform.InferType()(mod)
-    f = mod[mod.entry_func]
-    f = f if isinstance(f, relay.Function) else f.body
-    layout_map = collect_layout(f)
-    print(f.params)
-    print("bias layout = ", layout_map[f.params[2]][0])
-    print("haha", layout_map)
-
-
-def test_conv2d():
-    x = relay.var('x', shape=(1, 64, 56, 56))
-    weight = relay.var("weight")
-    y = relay.nn.conv2d(x, weight, channels=64, kernel_size=(3, 3), padding=(1, 1))
-    y = relay.Function(analysis.free_vars(y), y)
-    # ttype = relay.TensorType([], dtype='float32')
-    # assert_has_type(func, relay.FuncType([ttype], ttype))
-    mod = relay.Module.from_expr(y)
-    mod = transform.InferType()(mod)
-    f = mod[mod.entry_func]
-    f = f if isinstance(f, relay.Function) else f.body
-
-    layout_map = collect_layout(f)
-    print(layout_map)
-    print(f.params)
-    print("x layout = ", layout_map[f.params[0]][0])
+    # check results
+    def assert_func(node):
+        node_layout = layouts[node]
+        assert len(node_layout) == 1
+        node_layout = node_layout[0][:]
+        if isinstance(node, tvm.relay.expr.Var):
+            if node.name_hint == "x":
+                assert node_layout == "NCHW"
+            elif node.name_hint == "weight":
+                assert node_layout == "OIHW"
+            elif node.name_hint == "bias":
+                assert node_layout == "CHW"
+        elif isinstance(node, tvm.relay.expr.Call):
+            # conv2d
+            assert node_layout == "NCHW"
+    checker = AssertInferredLayout(assert_func)
+    checker.visit(f)
+    assert set(checker.nodes) == set(["x", "weight", "bias", "add", "nn.conv2d"]), checker.nodes
 
 
 def test_reverse_infer():
@@ -88,27 +111,26 @@ def test_reverse_infer():
     x = relay.nn.relu(x)
     weight = relay.var("weight")
     y = relay.nn.conv2d(x, weight, channels=64, kernel_size=(3, 3), padding=(1, 1))
-    layouts = run_infer_layout(y)#, in_layouts=[tvm.layout("NCHW")])
-    print_dict(layouts)
+    f, layouts = run_infer_layout(y)
 
-
-def test_given_input_layouts():
-    x = relay.var('x', shape=(1, 64, 56, 56))
-    x = relay.nn.relu(x)
-    y = relay.var("y", shape=(1, 1, 56, 56))
-    z = x + y
-    layouts = run_infer_layout(z, in_layouts=[tvm.layout("NCHW")])
-    print_dict(layouts)
+    # check results
+    def assert_func(node):
+        node_layout = layouts[node]
+        assert len(node_layout) == 1
+        node_layout = node_layout[0][:]
+        if isinstance(node, tvm.relay.expr.Var):
+            if node.name_hint == "x":
+                assert node_layout == "NCHW"
+            elif node.name_hint == "weight":
+                assert node_layout == "OIHW"
+        elif isinstance(node, tvm.relay.expr.Call):
+            assert node_layout == "NCHW"
+    checker = AssertInferredLayout(assert_func)
+    checker.visit(f)
+    assert set(checker.nodes) == set(["x", "weight", "nn.relu", "nn.conv2d"]), checker.nodes
 
 
 if __name__ == "__main__":
-    from tvm.relay.la import TensorLayout, TupleLayout
-    # a = TensorLayout(tvm.layout("NCHW"))
-    # print("A = ", a)
-    b = TupleLayout(["NCHW", "OIHW"])
-    print("B = ", b)
-    # test_unary()
-    # test_broadcast()
-    # test_conv2d()
-    # test_reverse_infer()
-    test_given_input_layouts()
+    test_relu()
+    test_conv2d_broadcast()
+    test_reverse_infer()
