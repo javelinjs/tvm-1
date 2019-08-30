@@ -57,7 +57,7 @@ def run_infer_layout(expr, in_layouts=[]):
         in_layout = tvm.layout(in_layouts[i]) \
             if isinstance(in_layouts[i], str) else in_layouts[i]
         in_layouts_map[f.params[i]] = in_layout
-    layout_map = collect_layout(f, in_layouts_map)
+    layout_map = collect_layout(mod, in_layouts_map)
     return f, layout_map
 
 
@@ -128,6 +128,19 @@ def test_reverse_infer():
     checker = AssertInferredLayout(assert_func)
     checker.visit(f)
     assert set(checker.nodes) == set(["x", "weight", "nn.relu", "nn.conv2d"]), checker.nodes
+
+
+def test_global_var_recursion():
+    mod = relay.Module({})
+    gv = relay.GlobalVar("main")
+    x = relay.var('x', shape=[])
+    tt = relay.scalar_type('float32')
+
+    func = relay.Function([x], relay.Call(gv, [x]), tt)
+    mod[gv] = func
+
+    # ft = run_infer_type(gv, mod)
+    # assert ft.checked_type == relay.FuncType([tt], tt)
 
 
 if __name__ == "__main__":

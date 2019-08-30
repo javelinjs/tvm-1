@@ -305,6 +305,10 @@ class Function(Expr):
         """
         return Call(self, args, None, None)
 
+    def __getitem__(self, item):
+        # TODO: doc
+        return _expr.FunctionGetAttr(self, item)
+
 
 @register_relay_node
 class Call(Expr):

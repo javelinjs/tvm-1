@@ -335,5 +335,8 @@ TVM_REGISTER_API("relay._expr.TempExprRealize")
   return temp->Realize();
 });
 
+TVM_REGISTER_API("relay._expr.FunctionGetAttr")
+.set_body_typed(FunctionGetAttr);
+
 }  // namespace relay
 }  // namespace tvm

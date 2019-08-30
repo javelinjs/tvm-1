@@ -1,3 +1,5 @@
+#include <utility>
+
 /*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
@@ -53,19 +55,22 @@ namespace relay {
 
 class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
  public:
-  LayoutInferencer() : modified_(false), timestamp_(0) {}
-
-  explicit LayoutInferencer(Map<Expr, RelayLayout>& in_layouts) : layout_map_(in_layouts) {}
+  explicit LayoutInferencer(Map<Expr, RelayLayout> in_layouts)
+    : modified_(false), timestamp_(0), layout_map_(std::move(in_layouts)) {}
 
   // inference the type of expr.
-  Expr Infer(Expr expr) {
-    this->VisitExpr(expr);
-    while (modified_) {
-      modified_ = false;
-      timestamp_++;
-      this->Infer(expr);
+  void Infer(const Module& mod) {
+    auto funcs = mod->functions;
+    for (auto pair : funcs) {
+      auto global_var = pair.first;  // TODO: set global_var: func_layout
+      auto func = pair.second;
+      this->VisitExpr(func);
+      while (modified_) {
+        modified_ = false;
+        timestamp_++;
+        this->VisitExpr(func);
+      }
     }
-    return expr;
   }
 
   Map<Expr, Array<Layout> > CollectLayoutInfo() {
@@ -85,13 +90,10 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
   }
 
  private:
-  // map from expression to checked type
-  // type inferencer will populate it up
-  // std::unordered_map<Expr, RelayLayout, NodeHash, NodeEqual> layout_map_;
-  Map<Expr, RelayLayout> layout_map_;
-  std::unordered_map<Expr, int, NodeHash, NodeEqual> layout_timestamp_;
   bool modified_;
   int timestamp_;
+  Map<Expr, RelayLayout> layout_map_;
+  std::unordered_map<Expr, int, NodeHash, NodeEqual> layout_timestamp_;
 
   RelayLayout GetLayout(const Expr& expr) {
     auto it = layout_map_.find(expr);
@@ -232,9 +234,9 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
 //  return LayoutInferencer().Infer(expr);
 //}
 
-Map<Expr, Array<Layout> > CollectLayoutInfo(const Expr& expr, Map<Expr, RelayLayout> in_layouts) {
+Map<Expr, Array<Layout> > CollectLayoutInfo(const Module& mod, const Map<Expr, RelayLayout>& in_layouts) {
   LayoutInferencer inferencer(in_layouts);
-  inferencer.Infer(expr);
+  inferencer.Infer(mod);
   return inferencer.CollectLayoutInfo();
 }
 
@@ -243,24 +245,30 @@ Map<Expr, Array<Layout> > CollectLayoutInfo(const Expr& expr, Map<Expr, RelayLay
 
 TVM_REGISTER_API("relay._analysis.CollectLayoutInfo")
 .set_body([](TVMArgs args, TVMRetValue *ret) {
-    *ret = CollectLayoutInfo(args[0].operator Expr(), args[1].operator Map<Expr, RelayLayout>());
+    *ret = CollectLayoutInfo(args[0].operator Module(), args[1].operator Map<Expr, RelayLayout>());
   });
 
-//namespace transform {
 
-//Pass InferLayout() {
+//Expr InferLayout(const Expr& expr, const Module& mod_ref, const Map<Expr, RelayLayout>& inputs) {
+//  CHECK(mod_ref.defined()) << "Undefined module.";
+//  return LayoutInferencer(mod_ref, mod_ref->GetGlobalVar("main"), inputs).Infer(expr);
+//}
+
+//namespace transform {
+//
+//Pass InferLayout(const Map<Expr, RelayLayout>& inputs) {
 //  runtime::TypedPackedFunc<Function(Function, Module, PassContext)> pass_func =
 //      [=](Function f, Module m, PassContext pc) {
-//        return Downcast<Function>(InferLayout(f, m));
+//        return Downcast<Function>(InferLayout(f, m, inputs));
 //      };
 //  return CreateFunctionPass(pass_func, 0, "InferLayout", {ir::StringImm::make("InferType")});
 //}
-
+//
 //TVM_REGISTER_API("relay._transform.InferLayout")
-//.set_body_typed<Pass()>([]() {
-//  return InferLayout();
+//.set_body_typed<Pass(Map<Expr, RelayLayout>)>([](Map<Expr, RelayLayout> inputs) {
+//  return InferLayout(inputs);
 //});
-
+//
 //}  // namespace transform
 
 }  // namespace relay

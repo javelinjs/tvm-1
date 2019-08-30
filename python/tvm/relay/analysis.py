@@ -330,7 +330,7 @@ def collect_device_annotation_ops(expr):
     return _analysis.CollectDeviceAnnotationOps(expr)
 
 
-def collect_layout(expr, in_layouts = {}):
+def collect_layout(mod, in_layouts = {}):
     layout_map = {}
     for key, value in in_layouts.items():
         if isinstance(value, Layout):
@@ -341,7 +341,7 @@ def collect_layout(expr, in_layouts = {}):
             layout_map[key] = TensorLayout(_create_tvm_layout(value))
         else:
             raise TypeError("Unknown value " + str(value))
-    return _analysis.CollectLayoutInfo(expr, layout_map)
+    return _analysis.CollectLayoutInfo(mod, layout_map)
 
 
 def get_total_mac_number(expr):
