@@ -62,14 +62,15 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
   void Infer(const Module& mod) {
     auto funcs = mod->functions;
     for (auto pair : funcs) {
-      auto global_var = pair.first;  // TODO: set global_var: func_layout
+      auto global_var = pair.first;
       auto func = pair.second;
-      this->VisitExpr(func);
+      auto func_layout = this->VisitExpr(func);
       while (modified_) {
         modified_ = false;
         timestamp_++;
-        this->VisitExpr(func);
+        func_layout = this->VisitExpr(func);
       }
+      layout_map_.Set(global_var, func_layout);
     }
   }
 
@@ -200,12 +201,10 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
   }
 
   RelayLayout VisitExpr_(const FunctionNode* f) final {
-    Array<RelayLayout> arg_layouts;
     for (auto param : f->params) {
-      arg_layouts.push_back(GetLayout(param));
+      GetLayout(param);
     }
-    auto rlayout = GetLayout(f->body);
-    return FuncLayoutNode::make(arg_layouts, rlayout);
+    return GetLayout(f->body);
   }
 
   RelayLayout VisitExpr_(const MatchNode* op) final {
@@ -229,47 +228,17 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
   }
 };
 
-//Expr InferLayout(const Expr& expr, const Module& mod_ref) {
-//  // TODO
-//  return LayoutInferencer().Infer(expr);
-//}
-
 Map<Expr, Array<Layout> > CollectLayoutInfo(const Module& mod, const Map<Expr, RelayLayout>& in_layouts) {
   LayoutInferencer inferencer(in_layouts);
   inferencer.Infer(mod);
   return inferencer.CollectLayoutInfo();
 }
 
-//TVM_REGISTER_API("relay._analysis.CollectLayoutInfo")
-//.set_body_typed(CollectLayoutInfo);
-
 TVM_REGISTER_API("relay._analysis.CollectLayoutInfo")
 .set_body([](TVMArgs args, TVMRetValue *ret) {
     *ret = CollectLayoutInfo(args[0].operator Module(), args[1].operator Map<Expr, RelayLayout>());
   });
 
-
-//Expr InferLayout(const Expr& expr, const Module& mod_ref, const Map<Expr, RelayLayout>& inputs) {
-//  CHECK(mod_ref.defined()) << "Undefined module.";
-//  return LayoutInferencer(mod_ref, mod_ref->GetGlobalVar("main"), inputs).Infer(expr);
-//}
-
-//namespace transform {
-//
-//Pass InferLayout(const Map<Expr, RelayLayout>& inputs) {
-//  runtime::TypedPackedFunc<Function(Function, Module, PassContext)> pass_func =
-//      [=](Function f, Module m, PassContext pc) {
-//        return Downcast<Function>(InferLayout(f, m, inputs));
-//      };
-//  return CreateFunctionPass(pass_func, 0, "InferLayout", {ir::StringImm::make("InferType")});
-//}
-//
-//TVM_REGISTER_API("relay._transform.InferLayout")
-//.set_body_typed<Pass(Map<Expr, RelayLayout>)>([](Map<Expr, RelayLayout> inputs) {
-//  return InferLayout(inputs);
-//});
-//
-//}  // namespace transform
 
 }  // namespace relay
 }  // namespace tvm

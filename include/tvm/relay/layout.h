@@ -69,31 +69,6 @@ class TupleLayoutNode : public RelayLayoutNode {
 
 RELAY_DEFINE_NODE_REF(TupleLayout, TupleLayoutNode, RelayLayout);
 
-class FuncLayout;
-/*!
- * \brief Function layout in Relay.
- */
-class FuncLayoutNode : public RelayLayoutNode {
- public:
-  /*! \brief layout of arguments */
-  tvm::Array<RelayLayout> arg_layouts;
-  /*! \brief The layout of return value. */
-  RelayLayout ret_layout;
-
-  void VisitAttrs(tvm::AttrVisitor* v) final {
-    v->Visit("arg_layouts", &arg_layouts);
-    v->Visit("ret_layout", &ret_layout);
-  }
-
-  TVM_DLL static FuncLayout make(tvm::Array<RelayLayout> arg_layouts,
-                                 RelayLayout ret_layout);
-
-  static constexpr const char* _type_key = "relay.FuncLayout";
-  TVM_DECLARE_NODE_TYPE_INFO(FuncLayoutNode, RelayLayoutNode);
-};
-
-RELAY_DEFINE_NODE_REF(FuncLayout, FuncLayoutNode, RelayLayout);
-
 class LayoutReporter;
 
 /*!
