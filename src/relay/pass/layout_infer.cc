@@ -1,5 +1,3 @@
-#include <utility>
-
 /*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
@@ -47,6 +45,7 @@
 #include <tvm/data_layout.h>
 #include <tvm/relay/transform.h>
 #include <tvm/relay/layout.h>
+#include <utility>
 #include "./pass_util.h"
 #include "../ir/type_functor.h"
 
@@ -55,8 +54,8 @@ namespace relay {
 
 class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
  public:
-  explicit LayoutInferencer(Map<Expr, RelayLayout> in_layouts)
-    : modified_(false), timestamp_(0), layout_map_(std::move(in_layouts)) {}
+  explicit LayoutInferencer(const Map<std::string, RelayLayout> in_layouts)
+    : modified_(false), timestamp_(0), var_layouts(std::move(in_layouts)) {}
 
   // inference the type of expr.
   void Infer(const Module& mod) {
@@ -93,6 +92,7 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
  private:
   bool modified_;
   int timestamp_;
+  Map<std::string, RelayLayout> var_layouts;
   Map<Expr, RelayLayout> layout_map_;
   std::unordered_map<Expr, int, NodeHash, NodeEqual> layout_timestamp_;
 
@@ -106,17 +106,21 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
     return layout_map_[expr];
   }
 
-  RelayLayout MakeLayoutIfNotExist(const Expr& expr, const Layout& default_layout = Layout::Undef()) {
+  RelayLayout MakeLayoutIfNotExist(const Expr &expr, const RelayLayout& default_layout = RelayLayout()) {
     if (layout_map_.count(expr)) {
       return layout_map_[expr];
     }
-    const size_t num_outputs = expr->checked_type()->is_type<TupleTypeNode>() ?
-                               expr->type_as<TupleTypeNode>()->fields.size() : 1;
     RelayLayout olayout;
-    if (num_outputs == 1) {
-      olayout = TensorLayoutNode::make(default_layout);
+    if (default_layout.defined()) {
+      olayout = default_layout;
     } else {
-      olayout = TupleLayoutNode::make(Array<Layout>(num_outputs, default_layout));
+      const size_t num_outputs = expr->checked_type()->is_type<TupleTypeNode>() ?
+                                 expr->type_as<TupleTypeNode>()->fields.size() : 1;
+      if (num_outputs == 1) {
+        olayout = TensorLayoutNode::make(Layout::Undef());
+      } else {
+        olayout = TupleLayoutNode::make(Array<Layout>(num_outputs, Layout::Undef()));
+      }
     }
     UpdateLayoutCache(expr, olayout);
     return olayout;
@@ -137,7 +141,8 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
 
   // Visitor Logic
   RelayLayout VisitExpr_(const VarNode* op) final {
-    return MakeLayoutIfNotExist(GetRef<Var>(op));
+    auto layout = var_layouts.count(op->name_hint()) ? var_layouts[op->name_hint()] : RelayLayout();
+    return MakeLayoutIfNotExist(GetRef<Var>(op), layout);
   }
 
   RelayLayout VisitExpr_(const GlobalVarNode* op) final {
@@ -228,7 +233,8 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
   }
 };
 
-Map<Expr, Array<Layout> > CollectLayoutInfo(const Module& mod, const Map<Expr, RelayLayout>& in_layouts) {
+Map<Expr, Array<Layout> > CollectLayoutInfo(const Module& mod,
+                                            const Map<std::string, RelayLayout>& in_layouts) {
   LayoutInferencer inferencer(in_layouts);
   inferencer.Infer(mod);
   return inferencer.CollectLayoutInfo();
@@ -236,7 +242,7 @@ Map<Expr, Array<Layout> > CollectLayoutInfo(const Module& mod, const Map<Expr, R
 
 TVM_REGISTER_API("relay._analysis.CollectLayoutInfo")
 .set_body([](TVMArgs args, TVMRetValue *ret) {
-    *ret = CollectLayoutInfo(args[0].operator Module(), args[1].operator Map<Expr, RelayLayout>());
+    *ret = CollectLayoutInfo(args[0].operator Module(), args[1].operator Map<std::string, RelayLayout>());
   });
 
 

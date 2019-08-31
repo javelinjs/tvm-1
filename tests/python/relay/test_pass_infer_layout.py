@@ -46,18 +46,12 @@ def print_dict(layouts):
         print()
 
 
-def run_infer_layout(expr, in_layouts=[]):
+def run_infer_layout(expr, layouts={}):
     expr = relay.Function(analysis.free_vars(expr), expr)
     mod = relay.Module.from_expr(expr)
     mod = transform.InferType()(mod)
     f = mod["main"]
-    f = f if isinstance(f, relay.Function) else f.body
-    in_layouts_map = {}
-    for i in range(len(in_layouts)):
-        in_layout = tvm.layout(in_layouts[i]) \
-            if isinstance(in_layouts[i], str) else in_layouts[i]
-        in_layouts_map[f.params[i]] = in_layout
-    layout_map = collect_layout(mod, in_layouts_map)
+    layout_map = collect_layout(mod, layouts)
     return f, layout_map
 
 
@@ -66,7 +60,7 @@ def test_relu():
     x = relay.nn.relu(x)
     y = relay.var("y", shape=(1, 1, 56, 56))
     z = x + y
-    f, layouts = run_infer_layout(z, in_layouts=[tvm.layout("NCHW")])
+    f, layouts = run_infer_layout(z, layouts={"x": tvm.layout("NCHW")})
     # check results
     def assert_func(node):
         node_layout = layouts[node]
@@ -84,7 +78,7 @@ def test_conv2d_broadcast():
 
     bias = relay.var("bias", shape=(64, 1, 1))
     z = relay.add(y, bias)
-    f, layouts = run_infer_layout(z, in_layouts=["NCHW"])
+    f, layouts = run_infer_layout(z, layouts={"x": "NCHW"})
 
     # check results
     def assert_func(node):
@@ -144,6 +138,6 @@ def test_global_var_recursion():
 
 
 if __name__ == "__main__":
-    test_relu()
+    # test_relu()
     test_conv2d_broadcast()
-    test_reverse_infer()
+    # test_reverse_infer()
