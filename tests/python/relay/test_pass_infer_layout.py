@@ -132,12 +132,32 @@ def test_global_var_recursion():
 
     func = relay.Function([x], relay.Call(gv, [x]), tt)
     mod[gv] = func
+    collect_layout(mod)
 
-    # ft = run_infer_type(gv, mod)
-    # assert ft.checked_type == relay.FuncType([tt], tt)
+
+def test_multi_func():
+    mod = relay.Module({})
+
+    x = relay.var('x', shape=(1, 64, 56, 56))
+    r = relay.nn.relu(x)
+    func_relu = relay.Function([x], r)
+
+    gv_relu = relay.GlobalVar("relu")
+    mod[gv_relu] = func_relu
+
+    y = relay.var("y", shape=(1, 1, 56, 56))
+    z = gv_relu + y
+    func = relay.Function([x, y], z, relay.TensorType((1, 64, 56, 56)))
+    mod[relay.GlobalVar("main")] = func
+
+    print(mod.astext())
+    layouts = collect_layout(mod, in_layouts={"x": "NCHW"})
+    print_dict(layouts)
 
 
 if __name__ == "__main__":
-    # test_relu()
+    test_relu()
     test_conv2d_broadcast()
-    # test_reverse_infer()
+    test_reverse_infer()
+    test_global_var_recursion()
+    test_multi_func()

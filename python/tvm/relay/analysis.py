@@ -341,7 +341,9 @@ def collect_layout(mod, in_layouts = {}):
             layout_map[key] = TensorLayout(_create_tvm_layout(value))
         else:
             raise TypeError("Unknown value " + str(value))
-    return _analysis.CollectLayoutInfo(mod, layout_map)
+    if len(layout_map) > 0:
+        return _analysis.CollectLayoutInfo(mod, layout_map)
+    return _analysis.CollectLayoutInfo(mod)
 
 
 def get_total_mac_number(expr):

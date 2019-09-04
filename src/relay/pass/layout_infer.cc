@@ -146,12 +146,11 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
   }
 
   RelayLayout VisitExpr_(const GlobalVarNode* op) final {
-    // module.lookup(var)
-    LOG(FATAL) << "GlobalVarNode";
+    return MakeLayoutIfNotExist(GetRef<GlobalVar>(op));
   }
 
   RelayLayout VisitExpr_(const ConstantNode* op) final {
-    LOG(FATAL) << "ConstantNode";
+    return MakeLayoutIfNotExist(GetRef<Constant>(op));
   }
 
   RelayLayout VisitExpr_(const TupleNode* op) final {
@@ -183,7 +182,11 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
     for (auto arg : call->args) {
       auto arg_layout = GetLayout(arg);
       layouts.push_back(arg_layout);
-      types.push_back(arg->checked_type());
+      if (const auto* func_type = arg->checked_type().as<FuncTypeNode>()) {
+        types.push_back(func_type->ret_type);
+      } else {
+        types.push_back(arg->checked_type());
+      }
       nodes.push_back(arg);
     }
 
@@ -193,12 +196,14 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
 
     static auto finfer_layout = Op::GetAttr<FInferLayout>("FInferLayout");
 
-    Op op = Downcast<Op>(call->op);
-    if (finfer_layout.count(op)) {
-      auto reporter = LayoutReporterNode::make(nodes, layouts);
-      bool infer_success = finfer_layout[op](layouts, types, call->args.size(), call->attrs, reporter);
-      if (infer_success) {
-        UpdateLayoutCache(reporter);
+    if (const auto* opnode = call->op.as<OpNode>()) {
+      Op op = Downcast<Op>(call->op);
+      if (finfer_layout.count(op)) {
+        auto reporter = LayoutReporterNode::make(nodes, layouts);
+        bool infer_success = finfer_layout[op](layouts, types, call->args.size(), call->attrs, reporter);
+        if (infer_success) {
+          UpdateLayoutCache(reporter);
+        }
       }
     }
     CHECK(layout_map_.count(node));
@@ -234,7 +239,8 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
 };
 
 Map<Expr, Array<Layout> > CollectLayoutInfo(const Module& mod,
-                                            const Map<std::string, RelayLayout>& in_layouts) {
+                                            const Map<std::string, RelayLayout>& in_layouts
+                                                  = Map<std::string, RelayLayout>()) {
   LayoutInferencer inferencer(in_layouts);
   inferencer.Infer(mod);
   return inferencer.CollectLayoutInfo();
@@ -242,7 +248,11 @@ Map<Expr, Array<Layout> > CollectLayoutInfo(const Module& mod,
 
 TVM_REGISTER_API("relay._analysis.CollectLayoutInfo")
 .set_body([](TVMArgs args, TVMRetValue *ret) {
-    *ret = CollectLayoutInfo(args[0].operator Module(), args[1].operator Map<std::string, RelayLayout>());
+    if (args.size() == 2) {
+      *ret = CollectLayoutInfo(args[0].operator Module(), args[1].operator Map<std::string, RelayLayout>());
+    } else {
+      *ret = CollectLayoutInfo(args[0].operator Module());
+    }
   });
 
 
