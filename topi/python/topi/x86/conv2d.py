@@ -121,7 +121,7 @@ def _create_tuning_space(cfg, data, kernel, strides, padding, dilation, layout):
         cfg.define_knob("unroll_kw", [True, False])
 
 
-@autotvm.register_topi_compute(conv2d, 'cpu', ['direct'])
+@autotvm.register_topi_compute(conv2d, ['cpu', 'arm_cpu'], ['direct'])
 def _declaration_conv(cfg, data, kernel, strides, padding, dilation, layout, out_dtype):
     out_dtype = data.dtype if out_dtype is None else out_dtype
     padding = padding if isinstance(padding, (tuple, list)) else (padding, padding)
@@ -220,7 +220,7 @@ def _declaration_conv_impl(cfg, data, kernel, strides, padding, dilation, layout
     return unpack
 
 
-@autotvm.register_topi_schedule(generic.schedule_conv2d_nchw, 'cpu', ['direct'])
+@autotvm.register_topi_schedule(generic.schedule_conv2d_nchw, ['cpu', 'arm_cpu'], ['direct'])
 def schedule_conv2d(cfg, outs):
     """Create schedule for tensors"""
     s = tvm.create_schedule([x.op for x in outs])
@@ -264,7 +264,7 @@ def schedule_conv2d(cfg, outs):
     return s
 
 
-@autotvm.register_topi_schedule(generic.schedule_conv2d_nhwc_pack, 'cpu', ['direct'])
+@autotvm.register_topi_schedule(generic.schedule_conv2d_nhwc_pack, ['cpu', 'arm_cpu'], ['direct'])
 def schedule_conv2d_nhwc_pack(cfg, outs):
     """Create schedule for tensors"""
     s = tvm.create_schedule([x.op for x in outs])
@@ -315,7 +315,7 @@ def schedule_conv2d_nhwc_pack(cfg, outs):
     return s
 
 
-@generic.schedule_conv2d_nhwc.register("cpu")
+@generic.schedule_conv2d_nhwc.register(["cpu", "arm_cpu"])
 def schedule_conv2d_nhwc(outs):
     """Create schedule for tensors"""
     s = tvm.create_schedule([x.op for x in outs])
@@ -410,7 +410,7 @@ def _topi_nn_conv2d_NCHWc(*args, **kwargs):
     return s, [new_data, new_kernel, C]
 
 
-@conv2d_alter_layout.register("cpu")
+@conv2d_alter_layout.register(["cpu", "arm_cpu"])
 def _alter_conv2d_layout(attrs, inputs, tinfo, F):
 
     copy_inputs = [s for s in inputs]
@@ -457,10 +457,13 @@ def _alter_conv2d_layout(attrs, inputs, tinfo, F):
         if is_depthwise else \
         autotvm.task.args_to_workload(
             [data, kernel, strides, padding, dilation, layout, out_dtype], conv2d)
-    cfg = dispatch_ctx.query(target, workload)
+    # cfg = dispatch_ctx.query(target, workload)
+    from tvm.autotvm.task.space import FallbackConfigEntity
+    cfg = FallbackConfigEntity()
     if cfg.is_fallback:
         _get_default_config(cfg, data, kernel, strides, padding, out_dtype, is_depthwise)
 
+    print("cfg", cfg)
     ic_bn, oc_bn = cfg["tile_ic"].size[-1], cfg["tile_oc"].size[-1]
 
     new_attrs[layout_name] = 'NCHW%dc' % ic_bn
@@ -524,7 +527,7 @@ def _alter_conv2d_layout(attrs, inputs, tinfo, F):
         return F.nn.contrib_conv2d_nchwc(*copy_inputs, **new_attrs)
 
 
-@conv2d_infer_layout.register("cpu")
+@conv2d_infer_layout.register(["cpu", "arm_cpu"])
 def _conv2d_infer_layout(workload, cfg):
     _, data, kernel, strides, padding, dilation, layout, dtype = workload
     batch_size, in_channel, in_height, in_width = data[:-1]
@@ -539,7 +542,7 @@ def _conv2d_infer_layout(workload, cfg):
     return ((in_shape, in_layout),), ((out_shape, out_layout),)
 
 
-@autotvm.register_topi_compute(conv2d_NCHWc, 'cpu', 'direct')
+@autotvm.register_topi_compute(conv2d_NCHWc, ['cpu', 'arm_cpu'], 'direct')
 def _declaration_conv_NCHWc(cfg, data, kernel, strides,
                             padding, dilation, layout, out_layout, out_dtype):
     # layout and out_layout are not used here,
@@ -635,7 +638,7 @@ def _declaration_conv_NCHWc(cfg, data, kernel, strides,
                        name='conv2d_NCHWc', tag="conv2d_NCHWc")
 
 
-@autotvm.register_topi_schedule(generic.schedule_conv2d_NCHWc, 'cpu', ['direct'])
+@autotvm.register_topi_schedule(generic.schedule_conv2d_NCHWc, ['cpu', 'arm_cpu'], ['direct'])
 def _schedule_conv2d_NCHWc(cfg, outs):
     """Create schedule for tensors"""
     s = tvm.create_schedule([x.op for x in outs])

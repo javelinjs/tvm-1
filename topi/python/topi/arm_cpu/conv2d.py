@@ -38,7 +38,7 @@ from ..nn.winograd_util import winograd_transform_matrices
 
 logger = logging.getLogger('topi')
 
-@autotvm.register_topi_compute(conv2d, 'arm_cpu', ['direct'])
+# @autotvm.register_topi_compute(conv2d, 'arm_cpu', ['direct'])
 def conv2d_arm_cpu(cfg, data, kernel, strides, padding, dilation, layout, out_dtype):
     """TOPI compute callback for conv2d
 
@@ -79,9 +79,9 @@ def conv2d_arm_cpu(cfg, data, kernel, strides, padding, dilation, layout, out_dt
                               num_tile=2)
 
 
-@autotvm.register_topi_schedule(
-    schedule_conv2d_nchw, 'arm_cpu',
-    ['direct', 'winograd', 'winograd_nnpack_fp16', 'winograd_nnpack_fp32'])
+# @autotvm.register_topi_schedule(
+#     schedule_conv2d_nchw, 'arm_cpu',
+#     ['direct', 'winograd', 'winograd_nnpack_fp16', 'winograd_nnpack_fp32'])
 def schedule_conv2d_nchw_arm_cpu(cfg, outs):
     """TOPI schedule callback for conv2d
 
@@ -303,7 +303,7 @@ def _schedule_spatial_pack(cfg, s, data_vec, kernel_vec,
     return s
 
 
-@autotvm.register_topi_compute(conv2d, 'arm_cpu', ['winograd'])
+# @autotvm.register_topi_compute(conv2d, 'arm_cpu', ['winograd'])
 def conv2d_arm_cpu_winograd(cfg, data, kernel, strides, padding, dilation, layout, out_dtype):
     """ TOPI compute callback. Use winograd template """
     tile_size = 4
@@ -483,7 +483,7 @@ def _schedule_winograd(cfg, s, output, last):
         s[output].compute_inline()
 
 
-@autotvm.register_topi_compute(conv2d, 'arm_cpu', ['winograd_nnpack_fp16'])
+# @autotvm.register_topi_compute(conv2d, 'arm_cpu', ['winograd_nnpack_fp16'])
 def conv2d_arm_cpu_winograd_nnpack_fp16(
         cfg, data, kernel, strides, padding, dilation, layout, out_dtype):
     """ TOPI compute callback. Use winograd_nnpack_fp16 template """
@@ -492,7 +492,7 @@ def conv2d_arm_cpu_winograd_nnpack_fp16(
         tvm.contrib.nnpack.ConvolutionAlgorithm.WT_8x8_FP16)
 
 
-@autotvm.register_topi_compute(conv2d, 'arm_cpu', ['winograd_nnpack_fp32'])
+# @autotvm.register_topi_compute(conv2d, 'arm_cpu', ['winograd_nnpack_fp32'])
 def conv2d_arm_cpu_winograd_nnpack_fp32(
         cfg, data, kernel, strides, padding, dilation, layout, out_dtype):
     """ TOPI compute callback. Use winograd_nnpack_fp32 template """
@@ -556,15 +556,15 @@ def _schedule_winograd_nnpack(cfg, s, output, last):
 
 
 ##### REGISTER TOPI COMPUTE / SCHEDULE FOR WINOGRAD WITH WEIGHT TRANSFORM #####
-@autotvm.register_topi_compute(conv2d_winograd_without_weight_transform, 'arm_cpu', ['winograd'])
+# @autotvm.register_topi_compute(conv2d_winograd_without_weight_transform, 'arm_cpu', ['winograd'])
 def conv2d_winograd_ww(cfg, data, kernel, strides, padding, dilation, layout, out_dtype, tile_size):
     """TOPI compute callback"""
     return _decl_winograd(cfg, data, kernel, strides, padding, dilation, layout, out_dtype,\
                           tile_size)
 
 
-@autotvm.register_topi_schedule(schedule_conv2d_winograd_without_weight_transform,
-                                'arm_cpu', ['winograd'])
+# @autotvm.register_topi_schedule(schedule_conv2d_winograd_without_weight_transform,
+#                                 'arm_cpu', ['winograd'])
 def schedule_conv2d_winograd_without_weight_transform_(cfg, outs):
     """TOPI schedule callback"""
     s = tvm.create_schedule([x.op for x in outs])
@@ -579,9 +579,9 @@ def schedule_conv2d_winograd_without_weight_transform_(cfg, outs):
 
 
 ##### REGISTER TOPI COMPUTE / SCHEDULE FOR WINOGRAD NNPACK WITHOUT WEIGHT TRANSFORM #####
-@autotvm.register_topi_compute(conv2d_winograd_nnpack_without_weight_transform,
-                               'arm_cpu',
-                               ['winograd_nnpack_fp16', 'winograd_nnpack_fp32'])
+# @autotvm.register_topi_compute(conv2d_winograd_nnpack_without_weight_transform,
+#                                'arm_cpu',
+#                                ['winograd_nnpack_fp16', 'winograd_nnpack_fp32'])
 def conv2d_winograd_nnpack_ww(cfg, data, transformed_kernel, bias, strides,
                               padding, dilation, layout, out_dtype):
     """ TOPI compute callback. Use winograd NNPACK template """
@@ -617,8 +617,8 @@ def conv2d_winograd_nnpack_ww(cfg, data, transformed_kernel, bias, strides,
     return output
 
 
-@autotvm.register_topi_schedule(schedule_conv2d_winograd_nnpack_without_weight_transform,
-                                'arm_cpu', ['winograd_nnpack_fp16', 'winograd_nnpack_fp32'])
+# @autotvm.register_topi_schedule(schedule_conv2d_winograd_nnpack_without_weight_transform,
+#                                 'arm_cpu', ['winograd_nnpack_fp16', 'winograd_nnpack_fp32'])
 def schedule_conv2d_winograd_nnpack_without_weight_transform_(cfg, outs):
     """TOPI schedule callback"""
     s = tvm.create_schedule([x.op for x in outs])
@@ -633,7 +633,7 @@ def schedule_conv2d_winograd_nnpack_without_weight_transform_(cfg, outs):
 
 
 ##### REGISTER ALTER OP LAYOUT #####
-@conv2d_alter_layout.register(["arm_cpu"])
+# @conv2d_alter_layout.register(["arm_cpu"])
 def _alter_conv2d_layout_arm(attrs, inputs, tinfos, F):
     """Alter op layout for pre-computing kernel transformation
 
@@ -788,7 +788,7 @@ def _alter_conv2d_layout_arm(attrs, inputs, tinfos, F):
             # add more schedule templates.
             return None
 
-@conv2d_legalize.register("arm_cpu")
+# @conv2d_legalize.register("arm_cpu")
 def _conv2d_legalize(attrs, inputs, arg_types):
     """Legalizes Conv2D op.
 
