@@ -463,7 +463,6 @@ def _alter_conv2d_layout(attrs, inputs, tinfo, F):
     if cfg.is_fallback:
         _get_default_config(cfg, data, kernel, strides, padding, out_dtype, is_depthwise)
 
-    print("cfg", cfg)
     ic_bn, oc_bn = cfg["tile_ic"].size[-1], cfg["tile_oc"].size[-1]
 
     new_attrs[layout_name] = 'NCHW%dc' % ic_bn
