@@ -457,9 +457,9 @@ def _alter_conv2d_layout(attrs, inputs, tinfo, F):
         if is_depthwise else \
         autotvm.task.args_to_workload(
             [data, kernel, strides, padding, dilation, layout, out_dtype], conv2d)
-    # cfg = dispatch_ctx.query(target, workload)
-    from tvm.autotvm.task.space import FallbackConfigEntity
-    cfg = FallbackConfigEntity()
+    cfg = dispatch_ctx.query(target, workload)
+    # from tvm.autotvm.task.space import FallbackConfigEntity
+    # cfg = FallbackConfigEntity()
     if cfg.is_fallback:
         _get_default_config(cfg, data, kernel, strides, padding, out_dtype, is_depthwise)
 
