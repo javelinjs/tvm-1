@@ -409,6 +409,28 @@ class AttrsHashVisitor {
   const AttrsHash& hasher_;
 };
 
+class AttrsCopyVisitor {
+ public:
+  // constructor
+  AttrsCopyVisitor(const Object* src, const Object* dst)
+      : src_(src), dst_(dst) {
+  }
+  template<typename T>
+  AttrNopEntry operator()(const char* key, T* src_value) {
+    T* dst_value =
+        reinterpret_cast<T*>(
+            reinterpret_cast<const char*>(dst_) +
+            (reinterpret_cast<const char*>(src_value) -
+             reinterpret_cast<const char*>(src_)));
+    *dst_value = *src_value;
+    return AttrNopEntry();
+  }
+
+ private:
+  const Object* src_;
+  const Object* dst_;
+};
+
 // helper entry that does initialization, set default.
 template<typename T>
 struct AttrInitEntry {
@@ -842,6 +864,14 @@ class AttrsNode : public BaseAttrsNode {
     visitor.result_ = this->GetTypeKeyHash();
     self()->__VisitAttrs__(visitor);
     return visitor.result_;
+  }
+
+  DerivedType ContentCopy() const {
+    DerivedType dst;
+    DerivedType* pself = self();
+    ::tvm::detail::AttrsCopyVisitor visitor(pself, &dst);
+    self()->__VisitAttrs__(visitor);
+    return dst;
   }
 
  private:
