@@ -85,6 +85,7 @@ def build(funcs, target, target_host=None):
     """
     if target_host == "":
         target_host = None
+    print("relay.backend.build")
     return _build.build(funcs, target=target, target_host=target_host)
 
 

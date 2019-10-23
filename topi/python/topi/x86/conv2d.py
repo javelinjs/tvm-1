@@ -100,6 +100,7 @@ def _declaration_conv(cfg, data, kernel, strides, padding, dilation, layout, out
     dilation = dilation if isinstance(dilation, (tuple, list)) else (dilation, dilation)
 
     if layout == 'NCHW':
+        return nn.conv2d_nchw(data, kernel, strides, padding, dilation, out_dtype)
         _create_tuning_space(cfg, data, kernel, strides, padding, dilation, layout)
         if cfg.is_fallback:
             _get_default_config(cfg, data, kernel, strides, padding, out_dtype)
@@ -202,6 +203,7 @@ def _declaration_conv_impl(cfg, data, kernel, strides, padding, dilation, layout
 def schedule_conv2d(cfg, outs):
     """Create schedule for tensors"""
     s = tvm.create_schedule([x.op for x in outs])
+    return s
     scheduled_ops = []
 
     def traverse(op):

@@ -79,6 +79,7 @@ def schedule_pool(outs, layout):
     """
     outs = [outs] if isinstance(outs, tvm.tensor.Tensor) else outs
     s = tvm.create_schedule([x.op for x in outs])
+    return s
     scheduled_ops = []
 
     def _schedule(PaddedInput, Pool):
