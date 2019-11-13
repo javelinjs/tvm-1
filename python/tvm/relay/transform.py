@@ -138,6 +138,7 @@ def build_config(opt_level=2,
                 "CanonicalizeCast": 3,
                 "EliminateCommonSubexpr": 3,
                 "CombineParallelConv2D": 4,
+                "CombineParallelDense": 4
             }
 
     fallback_device : int, str, or tvm.TVMContext, optional
@@ -400,6 +401,35 @@ def CombineParallelConv2D(min_num_branches=3):
     return _transform.CombineParallelConv2D(min_num_branches)
 
 
+def CombineParallelDense(min_num_branches=3):
+    """Combine multiple dense operators into one. For example:
+
+                data
+          /              \
+     dense (2,2)         dense (2,2)
+         |                 |
+    elemwise/bcast (2,2)  elemwise/bcast (2,2)
+
+    Would become:
+
+             data
+              |
+        batch_matmul+elemwise/bcast (2,2,2)
+
+    Parameters
+    ----------
+    min_num_branches : int
+        The minimum number of required parallel branches for performing this
+        optimization.
+
+    Returns
+    -------
+    ret: tvm.relay.Pass
+        The registered pass that combines parallel dense operators.
+    """
+    return _transform.CombineParallelDense(min_num_branches)
+
+
 def AlterOpLayout():
     """Alternate the layouts of operators or replace primitive operators with
     other expressions.
@@ -414,19 +444,24 @@ def AlterOpLayout():
     return _transform.AlterOpLayout()
 
 
-def Legalize():
+def Legalize(legalize_map_attr_name="FTVMLegalize"):
     """Legalizes an expression with another expression.
     This pass can be used to replace an expr with another expr for target
     dependent optimizations. For example, one expr, though semnatically
     equivalent to the other, can have better performance on a target. This pass
     can be used to legalize the expr in a target-dependent manner.
 
+    Parameters
+    ----------
+    legalize_map_attr_name : str
+        The Op's attr name which corresponds to the legalize rule function.
+
     Returns
     -------
     ret : tvm.relay.Pass
         The registered pass that rewrites an expr.
     """
-    return _transform.Legalize()
+    return _transform.Legalize(legalize_map_attr_name)
 
 
 def RewriteAnnotatedOps(fallback_device):
@@ -559,16 +594,21 @@ def LambdaLift():
     return _transform.LambdaLift()
 
 
-def PrintIR():
+def PrintIR(show_meta_data=True):
     """
     Print the IR for a module to help debugging.
+
+    Parameters
+    ----------
+    show_meta_data : bool
+        A boolean flag to indicate if meta data should be printed.
 
     Returns
     -------
     ret : tvm.relay.Pass
         The registered pass that prints the module IR.
     """
-    return _transform.PrintIR()
+    return _transform.PrintIR(show_meta_data)
 
 
 def gradient(expr, mod=None, mode='higher_order'):

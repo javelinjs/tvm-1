@@ -84,6 +84,17 @@ const GenericOpMap& Op::GetGenericAttr(const std::string& key) {
   return *it->second.get();
 }
 
+// Check if a key is present in the registry.
+const bool Op::HasGenericAttr(const std::string& key) {
+  OpManager* mgr = OpManager::Global();
+  std::lock_guard<std::mutex> lock(mgr->mutex);
+  auto it = mgr->attr.find(key);
+  if (it == mgr->attr.end()) {
+    return false;
+  }
+  return true;
+}
+
 void OpRegistry::UpdateAttr(const std::string& key,
                             TVMRetValue value,
                             int plevel) {
@@ -121,14 +132,25 @@ TVM_REGISTER_API("relay.op._ListOpNames")
 TVM_REGISTER_API("relay.op._GetOp").set_body_typed<Op(std::string)>(Op::Get);
 
 TVM_REGISTER_API("relay.op._OpGetAttr")
-    .set_body([](TVMArgs args, TVMRetValue* rv) {
-      Op op = args[0];
-      std::string attr_name = args[1];
-      auto op_map = Op::GetAttr<TVMRetValue>(attr_name);
-      if (op_map.count(op)) {
-        *rv = op_map[op];
-      }
-    });
+.set_body([](TVMArgs args, TVMRetValue* rv) {
+    Op op = args[0];
+    std::string attr_name = args[1];
+    auto op_map = Op::GetAttr<TVMRetValue>(attr_name);
+    if (op_map.count(op)) {
+      *rv = op_map[op];
+    }
+  });
+
+TVM_REGISTER_API("relay.op._OpSetAttr")
+.set_body([](TVMArgs args, TVMRetValue* rv) {
+    Op op = args[0];
+    std::string attr_name = args[1];
+    runtime::TVMArgValue value = args[2];
+    int plevel = args[3];
+    auto& reg =
+        OpRegistry::Registry()->__REGISTER_OR_GET__(op->name).set_name();
+    reg.set_attr(attr_name, value, plevel);
+  });
 
 TVM_REGISTER_API("relay.op._Register")
 .set_body([](TVMArgs args, TVMRetValue* rv) {
@@ -142,7 +164,7 @@ TVM_REGISTER_API("relay.op._Register")
     if (attr_key == "num_inputs" && plevel > 128) {
       reg.set_num_inputs(value);
     } else if (attr_key == "attrs_type_key" && plevel > 128) {
-      reg.set_attrs_type_key(value);
+      LOG(FATAL) << "attrs type key no longer supported";
     } else {
       // normal attr table override.
       if (args[2].type_code() == kFuncHandle) {
@@ -157,20 +179,29 @@ TVM_REGISTER_API("relay.op._Register")
     }
   });
 
+// helper to get internal dev function in objectref.
+struct Op2NodePtr : public ObjectRef {
+  static NodePtr<Node> Get(const Op& op) {
+    return GetDataPtr<Node>(op);
+  }
+};
+
 NodePtr<Node> CreateOp(const std::string& name) {
+  // Hack use TVMRetValue as exchange
   auto op = Op::Get(name);
   CHECK(op.defined()) << "Cannot find op \'" << name << '\'';
-  return op.node_;
+  return Op2NodePtr::Get(op);
 }
 
 TVM_REGISTER_NODE_TYPE(OpNode)
 .set_creator(CreateOp)
-.set_global_key([](const Node* n) {
+.set_global_key([](const Object* n) {
     return static_cast<const OpNode*>(n)->name;
   });
 
-TVM_STATIC_IR_FUNCTOR_REGISTER(IRPrinter, vtable)
-.set_dispatch<OpNode>([](const OpNode* node, tvm::IRPrinter* p) {
+TVM_STATIC_IR_FUNCTOR(IRPrinter, vtable)
+.set_dispatch<OpNode>([](const ObjectRef& ref, IRPrinter* p) {
+    auto* node = static_cast<const OpNode*>(ref.get());
     p->stream << "Op(" << node->name << ")";
   });
 

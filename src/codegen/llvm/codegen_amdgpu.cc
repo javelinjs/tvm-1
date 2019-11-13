@@ -71,7 +71,11 @@ class CodeGenAMDGPU : public CodeGenLLVM {
                 LLVMType(op->type), ConstInt32(constant_size));
           });
         if (alloca->getAlignment() < static_cast<uint32_t>(info.alignment)) {
+#if TVM_LLVM_VERSION >= 100
+          alloca->setAlignment(llvm::Align(info.alignment));
+#else
           alloca->setAlignment(info.alignment);
+#endif
         }
         buf = alloca;
       } else {
@@ -84,7 +88,11 @@ class CodeGenAMDGPU : public CodeGenLLVM {
         llvm::GlobalVariable *global = new llvm::GlobalVariable(
             *module_, type, false, llvm::GlobalValue::PrivateLinkage, 0, ".shared",
             nullptr, llvm::GlobalValue::NotThreadLocal, shared_address_space);
+#if TVM_LLVM_VERSION >= 100
+        global->setAlignment(llvm::Align(info.alignment));
+#else
         global->setAlignment(info.alignment);
+#endif
         buf = global;
       }
     }
@@ -170,17 +178,23 @@ inline int DetectROCMComputeVersion(const std::string& target) {
       return val.operator int();
     }
   }
-  LOG(WARNING) << "Cannot find -mcpu to specify rocm compute version assume gfx803";
-  return 803;
+  LOG(WARNING) << "Cannot find -mcpu to specify rocm compute version assume gfx900";
+  return 900;
 }
 
 runtime::Module BuildAMDGPU(Array<LoweredFunc> funcs, std::string target) {
+#if TVM_LLVM_VERSION < 90
+  LOG(FATAL) << "AMDGPU backend requires at least LLVM 9";
+  // Lower versions will crash when loading the bitcode, see
+  // issue #4087 for a discussion
+#endif
   InitializeLLVM();
   CHECK(target.length() >= 4 &&
         target.substr(0, 4) == "rocm");
   std::ostringstream config;
   config << "-mtriple=amdgcn-amd-amdhsa-hcc -mcpu=gfx"
          << DetectROCMComputeVersion(target)
+         << " -mattr=-code-object-v3 "
          << target.substr(4, target.length() - 4);
   std::unique_ptr<llvm::TargetMachine> tm = GetLLVMTargetMachine(config.str());
   std::unique_ptr<CodeGenAMDGPU> cg(new CodeGenAMDGPU());

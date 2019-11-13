@@ -38,9 +38,15 @@
 // - Tag the new version as the lates
 // - Periodically cleanup the old versions on local workers
 //
+
+// Hashtag in the source to build current CI docker builds
+//
+// - ci-cpu:v0.54: e7c88a99f830de30814df14eaa980547ecbd61c1
+//
+
 ci_lint = "tvmai/ci-lint:v0.51"
-ci_gpu = "tvmai/ci-gpu:v0.54"
-ci_cpu = "tvmai/ci-cpu:v0.52"
+ci_gpu = "tvmai/ci-gpu:v0.55"
+ci_cpu = "tvmai/ci-cpu:v0.54"
 ci_i386 = "tvmai/ci-i386:v0.52"
 
 // tvm libraries
@@ -139,7 +145,8 @@ stage('Build') {
            echo set\\(USE_CUDA ON\\) >> config.cmake
            echo set\\(USE_OPENGL ON\\) >> config.cmake
            echo set\\(USE_MICRO ON\\) >> config.cmake
-           echo set\\(USE_LLVM llvm-config-7\\) >> config.cmake
+           echo set\\(USE_MICRO_STANDALONE_RUNTIME ON\\) >> config.cmake
+           echo set\\(USE_LLVM llvm-config-9\\) >> config.cmake
            echo set\\(USE_NNPACK ON\\) >> config.cmake
            echo set\\(NNPACK_PATH /NNPACK/build/\\) >> config.cmake
            echo set\\(USE_RPC ON\\) >> config.cmake
@@ -183,6 +190,7 @@ stage('Build') {
            cp ../cmake/config.cmake .
            echo set\\(USE_SORT ON\\) >> config.cmake
            echo set\\(USE_MICRO ON\\) >> config.cmake
+           echo set\\(USE_MICRO_STANDALONE_RUNTIME ON\\) >> config.cmake
            echo set\\(USE_GRAPH_RUNTIME_DEBUG ON\\) >> config.cmake
            echo set\\(USE_VM_PROFILER ON\\) >> config.cmake
            echo set\\(USE_LLVM llvm-config-8\\) >> config.cmake
@@ -196,10 +204,10 @@ stage('Build') {
         make(ci_cpu, 'build', '-j2')
         pack_lib('cpu', tvm_lib)
         timeout(time: max_time, unit: 'MINUTES') {
-          sh "${docker_run} ${ci_cpu} ./tests/scripts/task_golang.sh"
           sh "${docker_run} ${ci_cpu} ./tests/scripts/task_python_unittest.sh"
           sh "${docker_run} ${ci_cpu} ./tests/scripts/task_python_integration.sh"
           sh "${docker_run} ${ci_cpu} ./tests/scripts/task_python_vta.sh"
+          sh "${docker_run} ${ci_cpu} ./tests/scripts/task_golang.sh"
         }
       }
     }
@@ -215,6 +223,7 @@ stage('Build') {
            echo set\\(USE_SORT ON\\) >> config.cmake
            echo set\\(USE_RPC ON\\) >> config.cmake
            echo set\\(USE_GRAPH_RUNTIME_DEBUG ON\\) >> config.cmake
+           echo set\\(USE_MICRO_STANDALONE_RUNTIME ON\\) >> config.cmake
            echo set\\(USE_VM_PROFILER ON\\) >> config.cmake
            echo set\\(USE_LLVM llvm-config-4.0\\) >> config.cmake
            echo set\\(CMAKE_CXX_COMPILER g++\\) >> config.cmake
@@ -229,7 +238,7 @@ stage('Build') {
 
 stage('Unit Test') {
   parallel 'python3: GPU': {
-    node('GPU') {
+    node('TensorCore') {
       ws('workspace/tvm/ut-python-gpu') {
         init_git()
         unpack_lib('gpu', tvm_multilib)

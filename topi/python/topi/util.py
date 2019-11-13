@@ -144,7 +144,7 @@ def equal_const_int(expr, value):
 
 
 def get_const_tuple(in_tuple):
-    """Verifies input tuple is IntImm, returns tuple of int.
+    """Verifies input tuple is IntImm or Var, returns tuple of int or Var.
 
     Parameters
     ----------
@@ -156,7 +156,17 @@ def get_const_tuple(in_tuple):
     out_tuple : tuple of int
         The output.
     """
-    return tuple(get_const_int(elem) for elem in in_tuple)
+    ret = []
+    for elem in in_tuple:
+        if isinstance(elem, tvm.expr.Var):
+            ret.append(elem)
+        elif not isinstance(elem, (tvm.expr.IntImm, tvm.expr.UIntImm, int)):
+            elem = tvm.ir_pass.Simplify(elem)
+            if not isinstance(elem, (tvm.expr.IntImm, tvm.expr.UIntImm)):
+                ret.append(elem)
+        else:
+            ret.append(get_const_int(elem))
+    return tuple(ret)
 
 
 def get_float_tuple(in_tuple):
@@ -232,10 +242,12 @@ def unravel_index(idx, shape):
     indices : tuple of int or tvm.expr.IntImm
         Corresponding coordinate of the 1D index
     """
+    idxd = tvm.indexdiv
+    idxm = tvm.indexmod
     indices = []
     for i in range(len(shape) - 1, -1, -1):
-        indices.append(idx % shape[i])
-        idx = idx // shape[i]
+        indices.append(idxm(idx, shape[i]))
+        idx = idxd(idx, shape[i])
     indices = indices[::-1]
     return indices
 
@@ -257,12 +269,13 @@ def const_matrix(matrix, name="const_matrix"):
     """
     row, col = matrix.shape
     dtype = str(matrix.dtype)
+    idxm = tvm.indexmod
 
     def select_array(i, j):
         now = tvm.const(0.0, dtype)
         for ii in range(row):
             for jj in range(col):
-                now = tvm.expr.Select(tvm.all(i % row == ii, j % col == jj),
+                now = tvm.expr.Select(tvm.all(idxm(i, row) == ii, idxm(j, col) == jj),
                                       tvm.const(matrix[ii][jj], dtype),
                                       now)
         return now

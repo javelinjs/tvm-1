@@ -18,8 +18,18 @@
  */
 
 /*!
- *  Copyright (c) 2019 by Contributors
  * \file micro_session.h
+ * \brief session to manage multiple micro modules
+ *
+ * Each session consists of an interaction with a *single* logical device.
+ * Within that interaction, multiple TVM modules can be loaded on the logical
+ * device.
+ *
+ * Multiple sessions can exist simultaneously, but there is only ever one
+ * *active* session. The idea of an active session mainly has implications for
+ * the frontend, in that one must make a session active in order to allocate
+ * new TVM objects on it. Aside from that, previously allocated objects can be
+ * used even if the session which they belong to is not currently active.
  */
 #ifndef TVM_RUNTIME_MICRO_MICRO_SESSION_H_
 #define TVM_RUNTIME_MICRO_MICRO_SESSION_H_
@@ -55,7 +65,7 @@ class MicroSession : public ModuleNode {
    * \return The corresponding member function.
    */
   virtual PackedFunc GetFunction(const std::string& name,
-                                 const std::shared_ptr<ModuleNode>& sptr_to_self);
+                                 const ObjectPtr<Object>& sptr_to_self);
 
   /*!
    * \return The type key of the executor.
@@ -74,7 +84,7 @@ class MicroSession : public ModuleNode {
    */
   ~MicroSession();
 
-  static std::shared_ptr<MicroSession>& Current();
+  static ObjectPtr<MicroSession>& Current();
 
   /*!
    * \brief creates session by setting up a low-level device and initting allocators for it
@@ -82,7 +92,10 @@ class MicroSession : public ModuleNode {
    */
   void CreateSession(const std::string& device_type,
                      const std::string& binary_path,
-                     const std::string& toolchain_prefix);
+                     const std::string& toolchain_prefix,
+                     std::uintptr_t base_addr,
+                     const std::string& server_addr,
+                     int port);
 
   /*!
    * \brief ends the session by destructing the low-level device and its allocators
@@ -226,7 +239,7 @@ class MicroSession : public ModuleNode {
     * \brief Push a new session context onto the thread-local stack.
     *  The session on top of the stack is used as the current global session.
     */
-  static void EnterWithScope(std::shared_ptr<MicroSession> session);
+  static void EnterWithScope(ObjectPtr<MicroSession> session);
   /*!
     * \brief Pop a session off the thread-local context stack,
     *  restoring the previous session as the current context.
@@ -244,7 +257,7 @@ struct MicroDevSpace {
   /*! \brief data being wrapped */
   void* data;
   /*! \brief shared ptr to session where this data is valid */
-  std::shared_ptr<MicroSession> session;
+  ObjectPtr<MicroSession> session;
 };
 
 }  // namespace runtime

@@ -34,10 +34,12 @@
 namespace tvm {
 
 TVM_REGISTER_NODE_TYPE(TargetNode);
+TVM_REGISTER_NODE_TYPE(GenericFuncNode);
 
 TVM_STATIC_IR_FUNCTOR(IRPrinter, vtable)
-.set_dispatch<TargetNode>([](const TargetNode *op, IRPrinter *p) {
-  p->stream << op->str();
+.set_dispatch<TargetNode>([](const ObjectRef& node, IRPrinter *p) {
+    auto* op = static_cast<const TargetNode*>(node.get());
+    p->stream << op->str();
   });
 
 
@@ -51,9 +53,7 @@ TVM_STATIC_IR_FUNCTOR(IRPrinter, vtable)
 */
 Target CreateTarget(const std::string& target_name,
                     const std::vector<std::string>& options) {
-  auto target = Target(make_node<TargetNode>());
-  auto t = static_cast<TargetNode*>(target.node_.get());
-
+  auto t = make_node<TargetNode>();
   t->target_name = target_name;
 
   std::string libs_flag = "-libs=";
@@ -137,7 +137,7 @@ Target CreateTarget(const std::string& target_name,
     return target::stackvm();
   }
 
-  return target;
+  return Target(t);
 }
 
 TVM_REGISTER_API("_TargetCreate")
@@ -331,8 +331,19 @@ Buffer BufferWithOffsetAlignment(Array<Expr> shape,
                                  Type dtype,
                                  std::string name,
                                  int data_alignment,
-                                 int offset_factor) {
+                                 int offset_factor,
+                                 bool compact) {
   auto data = Var(name, Handle());
+  bool has_any = false;
+  if (!compact) {
+    for (const auto& it : shape) {
+      if (it.as<Variable>()) {
+        has_any = true;
+        break;
+      }
+    }
+  }
+  BufferType buffer_type = has_any ? kAutoBroadcast : kDefault;
 
   Expr elem_offset;
   if (offset_factor != 0) {
@@ -342,10 +353,11 @@ Buffer BufferWithOffsetAlignment(Array<Expr> shape,
   }
 
   return BufferNode::make(data, dtype, shape, Array<Expr>(), elem_offset, name, "",
-    data_alignment, offset_factor, kDefault);
+    data_alignment, offset_factor, buffer_type);
 }
 
 void GetBinds(const Array<Tensor>& args,
+              bool compact,
               const std::unordered_map<Tensor, Buffer>& binds,
               Map<Tensor, Buffer>* out_binds,
               Array<NodeRef>* out_arg_list,
@@ -355,7 +367,7 @@ void GetBinds(const Array<Tensor>& args,
   for (const auto &x : args) {
     if (out_binds->find(x) == out_binds->end()) {
       auto buf = BufferWithOffsetAlignment(x->shape, x->dtype, x->op->name,
-        config->data_alignment, config->offset_factor);
+        config->data_alignment, config->offset_factor, compact);
       out_binds->Set(x, buf);
       out_arg_list->push_back(buf);
     } else {
@@ -380,15 +392,16 @@ Stmt BuildStmt(Schedule sch,
                bool loop_partition,
                Array<NodeRef> *out_arg_list,
                const BuildConfig& config) {
-  Map<Tensor, Buffer> out_binds;
-  GetBinds(args, binds, &out_binds, out_arg_list, config);
-
   sch = sch.normalize();
 
   // Phase 0
   auto bounds = schedule::InferBound(sch);
   auto stmt = schedule::ScheduleOps(sch, bounds, false);
   stmt = ir::InjectPrefetch(stmt);
+
+  bool compact = ir::VerifyCompactBuffer(stmt);
+  Map<Tensor, Buffer> out_binds;
+  GetBinds(args, compact, binds, &out_binds, out_arg_list, config);
 
   // Phase 1
   stmt = ir::StorageFlatten(stmt, out_binds, 64,
@@ -410,7 +423,6 @@ Stmt BuildStmt(Schedule sch,
 
   // Phase 2
   stmt = ir::Simplify(stmt);
-  stmt = ir::LowerStorageAccessInfo(stmt);
   stmt = ir::RemoveNoOp(stmt);
 
   if (!(config->disable_select_rewriting))
@@ -505,6 +517,7 @@ Array<Array<LoweredFunc> > split_dev_host_funcs(const Array<LoweredFunc>& funcs,
   for (size_t i = 0; i < fhost.size(); ++i) {
     auto func = fhost[i];
     func = ir::BindDeviceType(func, target->device_type);
+    func = ir::LowerDeviceStorageAccessInfo(func);
     func = ir::LowerTVMBuiltin(func);
     fhost.Set(i, func);
   }
@@ -512,6 +525,7 @@ Array<Array<LoweredFunc> > split_dev_host_funcs(const Array<LoweredFunc>& funcs,
   for (size_t i = 0; i < fhost.size(); ++i) {
     auto func = fhost[i];
     func = ir::LowerIntrin(func, target_host->target_name);
+    func = ir::LowerDeviceStorageAccessInfo(func);
     func = ir::CombineContextCall(func);
     fhost.Set(i, func);
   }
@@ -641,7 +655,8 @@ tvm::BuildConfig BuildConfig::Current() {
 TVM_REGISTER_NODE_TYPE(BuildConfigNode);
 
 TVM_STATIC_IR_FUNCTOR(IRPrinter, vtable)
-.set_dispatch<BuildConfigNode>([](const BuildConfigNode *op, IRPrinter *p) {
+.set_dispatch<BuildConfigNode>([](const ObjectRef& node, IRPrinter *p) {
+  auto* op = static_cast<const BuildConfigNode*>(node.get());
   p->stream << "build_config(";
   p->stream << "data_alignment=" << op->data_alignment << ", ";
   p->stream << "offset_factor=" << op->offset_factor << ", ";
@@ -661,7 +676,7 @@ TVM_STATIC_IR_FUNCTOR(IRPrinter, vtable)
 });
 
 struct GenericFunc::Manager {
-  std::unordered_map<std::string, NodePtr<Node> > fmap;
+  std::unordered_map<std::string, GenericFunc> fmap;
   // mutex
   std::mutex mutex;
 
@@ -681,10 +696,11 @@ GenericFunc GenericFunc::Get(const std::string& name) {
   if (it == m->fmap.end()) {
     auto f = make_node<GenericFuncNode>();
     f->name_ = name;
-    m->fmap[name] = f;
-    return GenericFunc(f);
+    auto gf = GenericFunc(f);
+    m->fmap[name] = gf;
+    return gf;
   } else {
-    return GenericFunc(it->second);
+    return it->second;
   }
 }
 
@@ -694,12 +710,12 @@ void GenericFunc::RegisterGenericFunc(GenericFunc func, const std::string& name)
   auto it = m->fmap.find(name);
   CHECK(it == m->fmap.end()) << "GenericFunc already registered " << name;
   func->name_ = name;
-  m->fmap[name] = func.node_;
+  m->fmap[name] = func;
 }
 
 GenericFunc& GenericFunc::set_default(const PackedFunc value,
-                                           bool allow_override) {
-  auto node = static_cast<GenericFuncNode*>(node_.get());
+                                      bool allow_override) {
+  auto node = static_cast<GenericFuncNode*>(operator->());
   if (!allow_override) {
     CHECK(node->generic_func_ == nullptr)
       << "Generic function already registered for " << node->name_;
@@ -723,7 +739,7 @@ GenericFunc& GenericFunc::register_func(const std::vector<std::string>& tags,
 }
 
 void GenericFunc::CallPacked(TVMArgs args, TVMRetValue* ret) const {
-  auto node = static_cast<GenericFuncNode*>(node_.get());
+  auto node = static_cast<const GenericFuncNode*>(get());
   auto target = Target::Current(true);
   PackedFunc func;
 

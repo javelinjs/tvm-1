@@ -6,9 +6,9 @@
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- * 
+ *
  *   http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -35,7 +35,9 @@
 #include <cmath>
 #include <algorithm>
 #include "rpc_session.h"
+#include "../object_internal.h"
 #include "../../common/ring_buffer.h"
+#include "../../common/socket.h"
 
 namespace tvm {
 namespace runtime {
@@ -1118,25 +1120,29 @@ void RPCModuleLoad(TVMArgs args, TVMRetValue *rv) {
   }
   std::string file_name = args[0];
   TVMRetValue ret = (*fsys_load_)(file_name);
-  Module m = ret;
-  *rv = static_cast<void*>(new Module(m));
+  // pass via void*
+  TVMValue value;
+  int rcode;
+  ret.MoveToCHost(&value, &rcode);
+  CHECK_EQ(rcode, kModuleHandle);
+  *rv = static_cast<void*>(value.v_handle);
 }
 
 void RPCModuleImport(TVMArgs args, TVMRetValue *rv) {
   void* pmod = args[0];
   void* cmod = args[1];
-  static_cast<Module*>(pmod)->Import(
-      *static_cast<Module*>(cmod));
+  ObjectInternal::GetModuleNode(pmod)->Import(
+      GetRef<Module>(ObjectInternal::GetModuleNode(cmod)));
 }
 
 void RPCModuleFree(TVMArgs args, TVMRetValue *rv) {
   void* mhandle = args[0];
-  delete static_cast<Module*>(mhandle);
+  ObjectInternal::ObjectFree(mhandle);
 }
 
 void RPCModuleGetFunc(TVMArgs args, TVMRetValue *rv) {
   void* mhandle = args[0];
-  PackedFunc pf = static_cast<Module*>(mhandle)->GetFunction(
+  PackedFunc pf = ObjectInternal::GetModuleNode(mhandle)->GetFunction(
       args[1], false);
   if (pf != nullptr) {
     *rv = static_cast<void*>(new PackedFunc(pf));
@@ -1148,7 +1154,7 @@ void RPCModuleGetFunc(TVMArgs args, TVMRetValue *rv) {
 void RPCModuleGetSource(TVMArgs args, TVMRetValue *rv) {
   void* mhandle = args[0];
   std::string fmt = args[1];
-  *rv = (*static_cast<Module*>(mhandle))->GetSource(fmt);
+  *rv = ObjectInternal::GetModuleNode(mhandle)->GetSource(fmt);
 }
 
 void RPCNDArrayFree(TVMArgs args, TVMRetValue *rv) {
@@ -1258,6 +1264,27 @@ PackedFunc WrapTimeEvaluator(PackedFunc pf,
     *rv = arr;
   };
   return PackedFunc(ftimer);
+}
+
+size_t CallbackChannel::Send(const void* data, size_t size) {
+  TVMByteArray bytes;
+  bytes.data = static_cast<const char*>(data);
+  bytes.size = size;
+  int64_t n = fsend_(bytes);
+  if (n == -1) {
+    common::Socket::Error("CallbackChannel::Send");
+  }
+  return static_cast<size_t>(n);
+}
+
+size_t CallbackChannel::Recv(void* data, size_t size) {
+  TVMRetValue ret = frecv_(size);
+  if (ret.type_code() != kBytes) {
+    common::Socket::Error("CallbackChannel::Recv");
+  }
+  std::string* bytes = ret.ptr<std::string>();
+  memcpy(static_cast<char*>(data), bytes->c_str(), bytes->length());
+  return bytes->length();
 }
 
 }  // namespace runtime

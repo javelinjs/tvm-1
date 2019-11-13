@@ -18,24 +18,11 @@
  */
 
 /*!
- *  Copyright (c) 2019 by Contributors
  * \file micro_session.cc
- * \brief session to manage multiple micro modules
- *
- * Each session consists of an interaction with a *single* logical device.
- * Within that interaction, multiple TVM modules can be loaded on the logical
- * device.
- *
- * Multiple sessions can exist simultaneously, but there is only ever one
- * *active* session. The idea of an active session mainly has implications for
- * the frontend, in that one must make a session active in order to allocate
- * new TVM objects on it. Aside from that, previously allocated objects can be
- * used even if the session which they belong to is not currently active.
  */
 
 #include <dmlc/thread_local.h>
 #include <tvm/runtime/registry.h>
-#include <memory>
 #include <stack>
 #include <tuple>
 #include <vector>
@@ -47,18 +34,18 @@ namespace tvm {
 namespace runtime {
 
 struct TVMMicroSessionThreadLocalEntry {
-  std::stack<std::shared_ptr<MicroSession>> session_stack;
+  std::stack<ObjectPtr<MicroSession>> session_stack;
 };
 
 typedef dmlc::ThreadLocalStore<TVMMicroSessionThreadLocalEntry> TVMMicroSessionThreadLocalStore;
 
-std::shared_ptr<MicroSession>& MicroSession::Current() {
+ObjectPtr<MicroSession>& MicroSession::Current() {
   TVMMicroSessionThreadLocalEntry *entry = TVMMicroSessionThreadLocalStore::Get();
   CHECK_GT(entry->session_stack.size(), 0) << "No current session";
   return entry->session_stack.top();
 }
 
-void MicroSession::EnterWithScope(std::shared_ptr<MicroSession> session) {
+void MicroSession::EnterWithScope(ObjectPtr<MicroSession> session) {
   TVMMicroSessionThreadLocalEntry *entry = TVMMicroSessionThreadLocalStore::Get();
   entry->session_stack.push(session);
 }
@@ -86,24 +73,37 @@ MicroSession::~MicroSession() {
   for (size_t i = 0; i < static_cast<size_t>(SectionKind::kNumKinds); i++) {
     section_allocators_[i] = nullptr;
   }
-
   low_level_device_ = nullptr;
 }
 
 void MicroSession::CreateSession(const std::string& device_type,
                                  const std::string& binary_path,
-                                 const std::string& toolchain_prefix) {
+                                 const std::string& toolchain_prefix,
+                                 std::uintptr_t base_addr,
+                                 const std::string& server_addr,
+                                 int port) {
   // TODO(weberlo): make device type enum
+  toolchain_prefix_ = toolchain_prefix;
   if (device_type == "host") {
     low_level_device_ = HostLowLevelDeviceCreate(memory_size_);
+  } else if (device_type == "openocd") {
+    // TODO(weberlo): We need a better way of configuring devices.
+    low_level_device_ = OpenOCDLowLevelDeviceCreate(base_addr, server_addr, port);
   } else {
     LOG(FATAL) << "unsupported micro low-level device";
   }
+
   SetRuntimeBinaryPath(binary_path);
   CHECK(!runtime_binary_path_.empty()) << "uTVM runtime not initialized";
   runtime_bin_info_ = LoadBinary(runtime_binary_path_, /* patch_dylib_pointers */ false);
   utvm_main_symbol_ = low_level_device()->ToDevOffset(runtime_symbol_map()["UTVMMain"]);
   utvm_done_symbol_ = low_level_device()->ToDevOffset(runtime_symbol_map()["UTVMDone"]);
+
+  if (device_type == "openocd") {
+    // Set OpenOCD device's stack pointer.
+    auto stack_section = GetAllocator(SectionKind::kStack);
+    low_level_device_->SetStackTop(stack_section->max_end_offset());
+  }
 
   // Patch workspace pointers to the start of the workspace section.
   DevBaseOffset workspace_start_offset = GetAllocator(SectionKind::kWorkspace)->start_offset();
@@ -119,7 +119,7 @@ void MicroSession::CreateSession(const std::string& device_type,
 void MicroSession::PushToExecQueue(DevBaseOffset func, const TVMArgs& args) {
   int32_t (*func_dev_addr)(void*, void*, int32_t) =
       reinterpret_cast<int32_t (*)(void*, void*, int32_t)>(
-      low_level_device()->ToDevPtr(func).value());
+          low_level_device()->ToDevPtr(func).value());
 
   // Create an allocator stream for the memory region after the most recent
   // allocation in the args section.
@@ -143,6 +143,7 @@ void MicroSession::PushToExecQueue(DevBaseOffset func, const TVMArgs& args) {
   };
   // Write the task.
   DevSymbolWrite(runtime_symbol_map(), "task", task);
+
   low_level_device()->Execute(utvm_main_symbol_, utvm_done_symbol_);
   // Check if there was an error during execution.  If so, log it.
   CheckDeviceError();
@@ -299,7 +300,7 @@ BinaryInfo MicroSession::LoadBinary(const std::string& binary_path, bool patch_d
 
 void MicroSession::PatchImplHole(const SymbolMap& symbol_map, const std::string& func_name) {
   void* runtime_impl_addr = runtime_symbol_map()[func_name].cast_to<void*>();
-  std::stringstream func_name_underscore;
+  std::ostringstream func_name_underscore;
   func_name_underscore << func_name << "_";
   DevSymbolWrite(symbol_map, func_name_underscore.str(), runtime_impl_addr);
 }
@@ -309,7 +310,7 @@ void MicroSession::SetRuntimeBinaryPath(std::string path) {
 }
 
 std::string MicroSession::ReadString(DevBaseOffset str_offset) {
-  std::stringstream result;
+  std::ostringstream result;
   const size_t buf_size = 256;
   std::vector<char> buf(buf_size, 0);
   size_t i = buf_size;
@@ -352,10 +353,10 @@ void MicroSession::DevSymbolWrite(const SymbolMap& symbol_map,
 
 PackedFunc MicroSession::GetFunction(
     const std::string& name,
-    const std::shared_ptr<ModuleNode>& sptr_to_self) {
+    const ObjectPtr<Object>& sptr_to_self) {
   if (name == "enter") {
-    return PackedFunc([sptr_to_self](TVMArgs args, TVMRetValue* rv) {
-      MicroSession::EnterWithScope(std::dynamic_pointer_cast<MicroSession>(sptr_to_self));
+    return PackedFunc([sptr_to_self, this](TVMArgs args, TVMRetValue* rv) {
+      MicroSession::EnterWithScope(GetObjectPtr<MicroSession>(this));
     });
   } else if (name == "exit") {
     return PackedFunc([sptr_to_self](TVMArgs args, TVMRetValue* rv) {
@@ -372,8 +373,12 @@ TVM_REGISTER_GLOBAL("micro._CreateSession")
     const std::string& device_type = args[0];
     const std::string& binary_path = args[1];
     const std::string& toolchain_prefix = args[2];
-    std::shared_ptr<MicroSession> session = std::make_shared<MicroSession>();
-    session->CreateSession(device_type, binary_path, toolchain_prefix);
+    uint64_t base_addr = args[3];
+    const std::string& server_addr = args[4];
+    int port = args[5];
+    ObjectPtr<MicroSession> session = make_object<MicroSession>();
+    session->CreateSession(
+        device_type, binary_path, toolchain_prefix, base_addr, server_addr, port);
     *rv = Module(session);
     });
 

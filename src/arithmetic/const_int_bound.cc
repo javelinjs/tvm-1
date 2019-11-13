@@ -39,7 +39,7 @@ ConstIntBound::ConstIntBound(
   auto node = make_node<ConstIntBoundNode>();
   node->min_value = min_value;
   node->max_value = max_value;
-  node_ = std::move(node);
+  data_ = std::move(node);
 }
 
 inline void PrintBoundValue(std::ostream& os, int64_t val) {
@@ -53,7 +53,8 @@ inline void PrintBoundValue(std::ostream& os, int64_t val) {
 }
 
 TVM_STATIC_IR_FUNCTOR(IRPrinter, vtable)
-.set_dispatch<ConstIntBoundNode>([](const ConstIntBoundNode* op, IRPrinter* p) {
+.set_dispatch<ConstIntBoundNode>([](const ObjectRef& node, IRPrinter* p) {
+    auto* op = static_cast<const ConstIntBoundNode*>(node.get());
     p->stream << "ConstIntBound[";
     PrintBoundValue(p->stream, op->min_value);
     p->stream << ',';

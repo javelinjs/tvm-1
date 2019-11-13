@@ -52,9 +52,9 @@ inline Tensor flatten(const Tensor& x,
                       std::string name = "tensor",
                       std::string tag = kInjective) {
   auto ishape = x->shape;
-  int dim = 1;
+  Expr dim = 1;
   for (size_t i = 1; i < ishape.size(); ++i) {
-    dim = dim * static_cast<int>(topi::detail::GetConstInt(ishape[i]));
+    dim = dim * ishape[i];
   }
 
   Array<Expr> oshape({ ishape[0], dim });
@@ -70,8 +70,8 @@ inline Tensor flatten(const Tensor& x,
       Expr idx = j;
       std::vector<Expr> index;
       for (auto s : extra_shape) {
-        index.push_back(idx % s);
-        idx = idx / s;
+        index.push_back(indexmod(idx, s));
+        idx = indexdiv(idx, s);
       }
       index.push_back(i);
       std::reverse(index.begin(), index.end());

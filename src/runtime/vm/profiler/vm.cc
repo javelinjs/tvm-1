@@ -18,7 +18,6 @@
  */
 
 /*!
- *  Copyright (c) 2019 by Contributors
  * \file src/runtime/vm/profiler/vm.cc
  * \brief The Relay debug virtual machine.
  */
@@ -41,7 +40,7 @@ namespace runtime {
 namespace vm {
 
 PackedFunc VirtualMachineDebug::GetFunction(
-    const std::string& name, const std::shared_ptr<ModuleNode>& sptr_to_self) {
+    const std::string& name, const ObjectPtr<Object>& sptr_to_self) {
   if (name == "get_stat") {
     return PackedFunc([sptr_to_self, this](TVMArgs args, TVMRetValue* rv) {
       double total_duration = 0.0;
@@ -85,19 +84,30 @@ PackedFunc VirtualMachineDebug::GetFunction(
   }
 }
 
-void VirtualMachineDebug::Init(const std::vector<TVMContext>& ctxs) {
-  VirtualMachine::Init(ctxs);
-  for (auto kv : primitive_map) {
+void VirtualMachineDebug::LoadExecutable(const Executable* exec) {
+  VirtualMachine::LoadExecutable(exec);
+  CHECK(this->exec);
+  for (auto kv : this->exec->primitive_map) {
     packed_index_map[kv.second] = kv.first;
     op_invokes[kv.second] = 0;
   }
 }
 
+void VirtualMachineDebug::Init(const std::vector<TVMContext>& ctxs) {
+  VirtualMachine::Init(ctxs);
+}
+
 void VirtualMachineDebug::InvokePacked(Index packed_index,
                                        const PackedFunc& func, Index arg_count,
                                        Index output_size,
-                                       const std::vector<Object>& args) {
-  auto ctx = VirtualMachine::GetParamsContext();
+                                       const std::vector<ObjectRef>& args) {
+  CHECK(this->exec);
+  auto ctx = this->GetParamsContext();
+  // warmup
+  VirtualMachine::InvokePacked(packed_index, func, arg_count, output_size,
+                               args);
+  TVMSynchronize(ctx.device_type, ctx.device_id, nullptr);
+
   auto op_begin = std::chrono::high_resolution_clock::now();
   VirtualMachine::InvokePacked(packed_index, func, arg_count, output_size,
                                args);
@@ -111,6 +121,21 @@ void VirtualMachineDebug::InvokePacked(Index packed_index,
   op_durations[packed_index].push_back(op_duration * 1e6);
   op_invokes[packed_index] += 1;
 }
+
+runtime::Module CreateVirtualMachineDebug(const Executable* exec) {
+  auto vm = make_object<VirtualMachineDebug>();
+  vm->LoadExecutable(exec);
+  return runtime::Module(vm);
+}
+
+TVM_REGISTER_GLOBAL("relay._vm._VirtualMachineDebug")
+.set_body([](TVMArgs args, TVMRetValue* rv) {
+  runtime::Module mod = args[0];
+  const auto* exec = dynamic_cast<Executable*>(mod.operator->());
+  CHECK(exec) << "Virtual machine has not been defined yet."
+              << "\n";
+  *rv = CreateVirtualMachineDebug(exec);
+});
 
 }  // namespace vm
 }  // namespace runtime
