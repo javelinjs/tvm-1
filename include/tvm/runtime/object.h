@@ -642,6 +642,8 @@ struct ObjectEqual {
  */
 #define TVM_DECLARE_BASE_OBJECT_INFO(TypeName, ParentType)              \
   static const uint32_t RuntimeTypeIndex()  {                           \
+    LOG(INFO) << "type index " << TypeName::_type_index;  \
+    LOG(INFO) << "type key " << TypeName::_type_key;  \
     if (TypeName::_type_index != ::tvm::runtime::TypeIndex::kDynamic) { \
       return TypeName::_type_index;                                     \
     }                                                                   \

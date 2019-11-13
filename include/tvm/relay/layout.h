@@ -2,7 +2,6 @@
 #define TVM_RELAY_LAYOUT_H_
 
 #include <tvm/data_layout.h>
-#include "./expr.h"
 
 namespace tvm {
 namespace relay {
@@ -17,7 +16,7 @@ class RelayLayoutNode : public RelayNode {
 class RelayLayout : public NodeRef {
  public:
   RelayLayout() {}
-  explicit RelayLayout(NodePtr<tvm::Node> p) : NodeRef(p) {}
+  explicit RelayLayout(ObjectPtr<tvm::Object> p) : NodeRef(p) {}
   /*!
    * \brief Whether the two layouts are equal.
    * \param rhs Another layout.
@@ -40,7 +39,6 @@ class TensorLayoutNode : public RelayLayoutNode {
   TVM_DLL static TensorLayout make(Layout layout);
 
   static constexpr const char* _type_key = "relay.TensorLayout";
-
   TVM_DECLARE_NODE_TYPE_INFO(TensorLayoutNode, RelayLayoutNode);
 };
 
@@ -108,7 +106,7 @@ class LayoutReporterNode : public Node {
 class LayoutReporter : public NodeRef {
  public:
   LayoutReporter() {}
-  explicit LayoutReporter(::tvm::NodePtr<::tvm::Node> n) : NodeRef(n) {
+  explicit LayoutReporter(::tvm::ObjectPtr<::tvm::Object> n) : NodeRef(n) {
   }
   LayoutReporterNode* operator->() const {
     return const_cast<LayoutReporterNode*>(
