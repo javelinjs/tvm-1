@@ -27,9 +27,9 @@
 namespace tvm {
 namespace relay {
 
-TensorLayout TensorLayoutNode::make(Layout layout) {
+TensorLayout TensorLayoutNode::make(const Layout& layout) {
   NodePtr<TensorLayoutNode> n = make_node<TensorLayoutNode>();
-  n->layout = std::move(layout);
+  n->layout = layout;
   return TensorLayout(n);
 }
 
@@ -75,8 +75,12 @@ void LayoutReporterNode::Assign(size_t index, const RelayLayout& layout) {
   this->results.Set(this->args[index], layout);
 }
 
+TVM_REGISTER_NODE_TYPE(TensorLayoutNode);
+
 TVM_REGISTER_API("relay._make.TensorLayout")
 .set_body_typed(TensorLayoutNode::make);
+
+TVM_REGISTER_NODE_TYPE(TupleLayoutNode);
 
 TVM_REGISTER_API("relay._make.TupleLayout")
 .set_body_typed(TupleLayoutNode::make);

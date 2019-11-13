@@ -2,6 +2,7 @@
 #define TVM_RELAY_LAYOUT_H_
 
 #include <tvm/data_layout.h>
+#include "./expr.h"
 
 namespace tvm {
 namespace relay {
@@ -36,7 +37,7 @@ class TensorLayoutNode : public RelayLayoutNode {
     v->Visit("layout", &layout);
   }
 
-  TVM_DLL static TensorLayout make(Layout layout);
+  TVM_DLL static TensorLayout make(const Layout& layout);
 
   static constexpr const char* _type_key = "relay.TensorLayout";
   TVM_DECLARE_NODE_TYPE_INFO(TensorLayoutNode, RelayLayoutNode);
