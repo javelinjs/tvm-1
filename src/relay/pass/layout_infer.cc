@@ -114,7 +114,7 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
     if (default_layout.defined()) {
       olayout = default_layout;
     } else {
-      const size_t num_outputs = expr->checked_type()->is_type<TupleTypeNode>() ?
+      const size_t num_outputs = expr->checked_type()->IsInstance<TupleTypeNode>() ?
                                  expr->type_as<TupleTypeNode>()->fields.size() : 1;
       if (num_outputs == 1) {
         olayout = TensorLayoutNode::make(Layout::Undef());

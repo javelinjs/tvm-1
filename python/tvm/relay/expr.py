@@ -306,11 +306,6 @@ class Function(Expr):
         """
         return Call(self, args, None, None)
 
-<<<<<<< HEAD
-    def __getitem__(self, item):
-        # TODO: doc
-        return _expr.FunctionGetAttr(self, item)
-=======
     def get_params(self):
         return _expr.FunctionGetParams(self)
 
@@ -324,7 +319,6 @@ class Function(Expr):
 
     def set_attribute(self, name, ref):
         return _expr.FunctionSetAttr(self, name, ref)
->>>>>>> upstream/master
 
 
 @register_relay_node

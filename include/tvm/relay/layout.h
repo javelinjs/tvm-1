@@ -33,7 +33,7 @@ class TensorLayoutNode : public RelayLayoutNode {
  public:
   Layout layout;
 
-  void VisitAttrs(tvm::AttrVisitor *v) final {
+  void VisitAttrs(tvm::AttrVisitor *v) {
     v->Visit("layout", &layout);
   }
 
@@ -57,7 +57,7 @@ class TupleLayoutNode : public RelayLayoutNode {
 
   TupleLayoutNode() {}
 
-  void VisitAttrs(tvm::AttrVisitor* v) final {
+  void VisitAttrs(tvm::AttrVisitor* v) {
     v->Visit("fields", &fields);
   }
 
@@ -91,7 +91,7 @@ class LayoutReporterNode : public Node {
   TVM_DLL static LayoutReporter make(tvm::Array<Expr> args, tvm::Array<RelayLayout> args_layout);
 
   // solver is not serializable.
-  void VisitAttrs(tvm::AttrVisitor* v) final {
+  void VisitAttrs(tvm::AttrVisitor* v) {
     v->Visit("args", &args);
     v->Visit("args_layout", &args_layout);
     v->Visit("results", &results);
@@ -111,7 +111,8 @@ class LayoutReporter : public NodeRef {
   explicit LayoutReporter(::tvm::NodePtr<::tvm::Node> n) : NodeRef(n) {
   }
   LayoutReporterNode* operator->() const {
-    return static_cast<LayoutReporterNode*>(node_.get());
+    return const_cast<LayoutReporterNode*>(
+        static_cast<const LayoutReporterNode*>(get()));
   }
   using ContainerType = LayoutReporterNode;
 };
