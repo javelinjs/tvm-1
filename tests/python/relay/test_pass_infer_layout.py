@@ -22,37 +22,43 @@ from tvm.relay import transform, analysis
 from tvm.relay.analysis import collect_layout
 from tvm.relay.expr_functor import ExprVisitor
 
+class NameInferredLayout(ExprVisitor):
+    def __init__(self, layout_map):
+        super(NameInferredLayout, self).__init__()
+        self.layouts = layout_map
+        self.named_layouts = {}
 
-class AssertInferredLayout(ExprVisitor):
-    def __init__(self, assert_func):
-        super(AssertInferredLayout, self).__init__()
-        self.assert_func = assert_func
-        self.nodes = []
+    def to_list(self, arr):
+        l = []
+        for i in range(len(arr)):
+            if arr[i]:
+                l.append(arr[i][:])
+            else:
+                l.append(arr[i])
+        return l
 
     def visit_call(self, call):
         for arg in call.args:
             self.visit(arg)
-        self.assert_func(call)
-        self.nodes.append(call.op.name)
+        if isinstance(call.op, tvm.relay.expr.GlobalVar):
+            self.named_layouts[call.op.name_hint] = self.to_list(self.layouts[call])
+        else:
+            self.named_layouts[call.op.name] = self.to_list(self.layouts[call])
 
     def visit_var(self, var):
-        self.assert_func(var)
-        self.nodes.append(var.name_hint)
+        self.named_layouts[var.name_hint] = self.to_list(self.layouts[var])
 
 
-def print_dict(layouts):
-    for k, v in layouts.items():
-        print(k, "|:", v)
-        print()
-
-
-def run_infer_layout(expr, layouts={}):
-    expr = relay.Function(analysis.free_vars(expr), expr)
-    mod = relay.Module.from_expr(expr)
+def run_infer_layout(mod, layouts={}):
+    if not isinstance(mod, relay.Module):
+        func = relay.Function(analysis.free_vars(mod), mod)
+        mod = relay.Module.from_expr(func)
     mod = transform.InferType()(mod)
-    f = mod["main"]
     layout_map = collect_layout(mod, layouts)
-    return f, layout_map
+    namer = NameInferredLayout(layout_map)
+    for func in mod.get_global_vars():
+        namer.visit(mod[func])
+    return namer.named_layouts
 
 
 def test_relu():
@@ -60,15 +66,13 @@ def test_relu():
     x = relay.nn.relu(x)
     y = relay.var("y", shape=(1, 1, 56, 56))
     z = x + y
-    f, layouts = run_infer_layout(z, layouts={"x": tvm.layout("NCHW")})
-    # check results
-    def assert_func(node):
-        node_layout = layouts[node]
-        assert len(node_layout) == 1
-        assert node_layout[0][:] == "NCHW"
-    checker = AssertInferredLayout(assert_func)
-    checker.visit(f)
-    assert set(checker.nodes) == set(["x", "y", "nn.relu", "add"]), checker.nodes
+    layouts = run_infer_layout(z, layouts={"x": "NCHW"})
+
+    assert layouts["x"][0][:] == "NCHW"
+    assert layouts["x"] == ["NCHW"]
+    assert layouts["y"] == ["NCHW"]
+    assert layouts["nn.relu"] == ["NCHW"]
+    assert layouts["add"] == ["NCHW"]
 
 
 def test_conv2d_broadcast():
@@ -78,26 +82,13 @@ def test_conv2d_broadcast():
 
     bias = relay.var("bias", shape=(64, 1, 1))
     z = relay.add(y, bias)
-    f, layouts = run_infer_layout(z, layouts={"x": "NCHW"})
+    layouts = run_infer_layout(z, layouts={"x": "NCHW"})
 
-    # check results
-    def assert_func(node):
-        node_layout = layouts[node]
-        assert len(node_layout) == 1
-        node_layout = node_layout[0][:]
-        if isinstance(node, tvm.relay.expr.Var):
-            if node.name_hint == "x":
-                assert node_layout == "NCHW"
-            elif node.name_hint == "weight":
-                assert node_layout == "OIHW"
-            elif node.name_hint == "bias":
-                assert node_layout == "CHW"
-        elif isinstance(node, tvm.relay.expr.Call):
-            # conv2d
-            assert node_layout == "NCHW"
-    checker = AssertInferredLayout(assert_func)
-    checker.visit(f)
-    assert set(checker.nodes) == set(["x", "weight", "bias", "add", "nn.conv2d"]), checker.nodes
+    assert layouts["x"] == ["NCHW"]
+    assert layouts["weight"] == ["OIHW"]
+    assert layouts["bias"] == ["CHW"]
+    assert layouts["add"] == ["NCHW"]
+    assert layouts["nn.conv2d"] == ["NCHW"]
 
 
 def test_reverse_infer():
@@ -105,23 +96,12 @@ def test_reverse_infer():
     x = relay.nn.relu(x)
     weight = relay.var("weight")
     y = relay.nn.conv2d(x, weight, channels=64, kernel_size=(3, 3), padding=(1, 1))
-    f, layouts = run_infer_layout(y)
+    layouts = run_infer_layout(y)
 
-    # check results
-    def assert_func(node):
-        node_layout = layouts[node]
-        assert len(node_layout) == 1
-        node_layout = node_layout[0][:]
-        if isinstance(node, tvm.relay.expr.Var):
-            if node.name_hint == "x":
-                assert node_layout == "NCHW"
-            elif node.name_hint == "weight":
-                assert node_layout == "OIHW"
-        elif isinstance(node, tvm.relay.expr.Call):
-            assert node_layout == "NCHW"
-    checker = AssertInferredLayout(assert_func)
-    checker.visit(f)
-    assert set(checker.nodes) == set(["x", "weight", "nn.relu", "nn.conv2d"]), checker.nodes
+    assert layouts["x"] == ["NCHW"]
+    assert layouts["weight"] == ["OIHW"]
+    assert layouts["nn.conv2d"] == ["NCHW"]
+    assert layouts["nn.relu"] == ["NCHW"]
 
 
 def test_global_var_recursion():
@@ -132,7 +112,10 @@ def test_global_var_recursion():
 
     func = relay.Function([x], relay.Call(gv, [x]), tt)
     mod[gv] = func
-    collect_layout(mod)
+    layouts = run_infer_layout(mod)
+    # TODO: should it be undef?
+    assert layouts["main"] == [None]
+    assert layouts["x"] == [None]
 
 
 def test_multi_func():
@@ -150,9 +133,15 @@ def test_multi_func():
     func = relay.Function([x, y], z, relay.TensorType((1, 64, 56, 56)))
     mod[relay.GlobalVar("main")] = func
 
-    print(mod.astext())
-    layouts = collect_layout(mod, in_layouts={"x": "NCHW"})
-    print_dict(layouts)
+    # print(mod.astext())
+    layouts = run_infer_layout(mod, layouts={"x": "NCHW"})
+
+    # first function
+    assert layouts["x"] == ["NCHW"]
+    assert layouts["nn.relu"] == ["NCHW"]
+    # second function
+    assert layouts["y"] == ["NCHW"]
+    assert layouts["add"] == ["NCHW"]
 
 
 if __name__ == "__main__":
