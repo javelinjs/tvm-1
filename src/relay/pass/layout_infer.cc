@@ -55,7 +55,7 @@ namespace relay {
 class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
  public:
   explicit LayoutInferencer(const Map<std::string, RelayLayout> in_layouts)
-    : modified_(false), timestamp_(0), var_layouts(std::move(in_layouts)) {}
+    : modified_(false), timestamp_(0), var_layouts_(std::move(in_layouts)) {}
 
   // inference the type of expr.
   void Infer(const Module& mod) {
@@ -92,7 +92,7 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
  private:
   bool modified_;
   int timestamp_;
-  Map<std::string, RelayLayout> var_layouts;
+  Map<std::string, RelayLayout> var_layouts_;
   Map<Expr, RelayLayout> layout_map_;
   std::unordered_map<Expr, int, NodeHash, NodeEqual> layout_timestamp_;
 
@@ -100,57 +100,59 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
     auto it = layout_map_.find(expr);
     if (it == layout_map_.end() || layout_timestamp_[expr] < timestamp_) {
       auto layout = this->VisitExpr(expr);
-      layout_timestamp_[expr] = timestamp_;
-      UpdateLayoutCache(expr, layout);
+      SetLayout(expr, layout);
     }
     return layout_map_[expr];
   }
 
-  RelayLayout MakeLayoutIfNotExist(const Expr &expr, const RelayLayout& default_layout = RelayLayout()) {
-    if (layout_map_.count(expr)) {
-      return layout_map_[expr];
-    }
-    RelayLayout olayout;
-    if (default_layout.defined()) {
-      olayout = default_layout;
-    } else {
-      const size_t num_outputs = expr->checked_type()->IsInstance<TupleTypeNode>() ?
-                                 expr->type_as<TupleTypeNode>()->fields.size() : 1;
-      if (num_outputs == 1) {
-        olayout = TensorLayoutNode::make(Layout::Undef());
-      } else {
-        olayout = TupleLayoutNode::make(Array<Layout>(num_outputs, Layout::Undef()));
-      }
-    }
-    UpdateLayoutCache(expr, olayout);
-    return olayout;
-  }
-
-  void UpdateLayoutCache(const Expr& expr, const RelayLayout& layout) {
+  void SetLayout(const Expr& expr, const RelayLayout& layout) {
+    layout_timestamp_[expr] = timestamp_;
     if (!layout_map_.count(expr) || !layout_map_[expr].Equals(layout)) {
       layout_map_.Set(expr, layout);
       modified_ = true;
     }
   }
 
-  void UpdateLayoutCache(const LayoutReporter& reporter) {
+  void SetLayout(const LayoutReporter& reporter) {
     for (auto& it : reporter->results) {
-      UpdateLayoutCache(it.first, it.second);
+      SetLayout(it.first, it.second);
+    }
+  }
+
+  inline RelayLayout UndefLayout(const Expr& expr) {
+    if (expr->checked_type()->IsInstance<TupleTypeNode>()) {
+      const size_t num_outputs = expr->type_as<TupleTypeNode>()->fields.size();
+      return TupleLayoutNode::make(Array<Layout>(num_outputs, Layout::Undef()));
+    } else {
+      return TensorLayoutNode::make(Layout::Undef());
     }
   }
 
   // Visitor Logic
   RelayLayout VisitExpr_(const VarNode* op) final {
-    auto layout = var_layouts.count(op->name_hint()) ? var_layouts[op->name_hint()] : RelayLayout();
-    return MakeLayoutIfNotExist(GetRef<Var>(op), layout);
+    if (!layout_map_.count(GetRef<Var>(op))) {
+      auto layout = var_layouts_.count(op->name_hint())
+          ? var_layouts_[op->name_hint()]
+          : UndefLayout(GetRef<Var>(op));
+      SetLayout(GetRef<Var>(op), layout);
+    }
+    return layout_map_[GetRef<Var>(op)];
   }
 
   RelayLayout VisitExpr_(const GlobalVarNode* op) final {
-    return MakeLayoutIfNotExist(GetRef<GlobalVar>(op));
+    auto expr = GetRef<GlobalVar>(op);
+    if (!layout_map_.count(expr)) {
+      SetLayout(expr, UndefLayout(expr));
+    }
+    return layout_map_[expr];
   }
 
   RelayLayout VisitExpr_(const ConstantNode* op) final {
-    return MakeLayoutIfNotExist(GetRef<Constant>(op));
+    auto expr = GetRef<Constant>(op);
+    if (!layout_map_.count(expr)) {
+      SetLayout(expr, UndefLayout(expr));
+    }
+    return layout_map_[expr];
   }
 
   RelayLayout VisitExpr_(const TupleNode* op) final {
@@ -190,7 +192,9 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
       nodes.push_back(arg);
     }
 
-    layouts.push_back(MakeLayoutIfNotExist(node));
+    auto curr_layout = layout_map_.count(node) ? layout_map_[node] : UndefLayout(node);
+    SetLayout(node, curr_layout);
+    layouts.push_back(curr_layout);
     types.push_back(call->checked_type());
     nodes.push_back(GetRef<Call>(call));
 
@@ -202,10 +206,11 @@ class LayoutInferencer : private ExprFunctor<RelayLayout(const Expr&)> {
         auto reporter = LayoutReporterNode::make(nodes, layouts);
         bool infer_success = finfer_layout[op](layouts, types, call->args.size(), call->attrs, reporter);
         if (infer_success) {
-          UpdateLayoutCache(reporter);
+          SetLayout(reporter);
         }
       }
     }
+
     CHECK(layout_map_.count(node));
     return layout_map_[node];
   }
