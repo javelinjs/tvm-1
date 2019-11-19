@@ -26,6 +26,8 @@ def get_ref_func(data,
                  kernel,
                  input_zero_point,
                  kernel_zero_point,
+                 input_scale,
+                 kernel_scale,
                  kernel_size,
                  padding,
                  strides,
@@ -56,6 +58,8 @@ def get_qnn_func(data,
                  kernel,
                  input_zero_point,
                  kernel_zero_point,
+                 input_scale,
+                 kernel_scale,
                  kernel_size,
                  padding,
                  strides,
@@ -67,6 +71,8 @@ def get_qnn_func(data,
             data, kernel,
             input_zero_point=input_zero_point,
             kernel_zero_point=kernel_zero_point,
+            input_scale=input_scale,
+            kernel_scale=kernel_scale,
             kernel_size=kernel_size,
             strides=strides,
             dilation=dilation,
@@ -85,6 +91,8 @@ def get_funcs(data_shape,
               kernel_dtype,
               input_zero_point,
               kernel_zero_point,
+              input_scale,
+              kernel_scale,
               kernel_size,
               padding,
               strides,
@@ -100,6 +108,8 @@ def get_funcs(data_shape,
                             kernel,
                             input_zero_point,
                             kernel_zero_point,
+                            input_scale,
+                            kernel_scale,
                             kernel_size,
                             padding,
                             strides,
@@ -112,6 +122,8 @@ def get_funcs(data_shape,
                             kernel,
                             input_zero_point,
                             kernel_zero_point,
+                            input_scale,
+                            kernel_scale,
                             kernel_size,
                             padding,
                             strides,
@@ -160,7 +172,7 @@ def verify(ref_func, qnn_func, data_shape, data_dtype, kernel_shape,
     qnn_output = get_output(qnn_func, golden_inputs)
     np.testing.assert_equal(qnn_output, golden_output)
 
-def no_zero_point_test():
+def test_no_zero_point():
     # uint8 input
     data_shape = (2, 1, 2, 4)
     data_dtype = 'uint8'
@@ -172,6 +184,8 @@ def no_zero_point_test():
                                    kernel_dtype=kernel_dtype,
                                    input_zero_point=0,
                                    kernel_zero_point=0,
+                                   input_scale=1.0,
+                                   kernel_scale=1.0,
                                    kernel_size=(2, 2),
                                    padding=(0, 0),
                                    strides=(1, 1),
@@ -193,6 +207,8 @@ def no_zero_point_test():
                                    kernel_dtype=kernel_dtype,
                                    input_zero_point=0,
                                    kernel_zero_point=0,
+                                   input_scale=1.0,
+                                   kernel_scale=1.0,
                                    kernel_size=(2, 2),
                                    padding=(0, 0),
                                    strides=(1, 1),
@@ -203,7 +219,7 @@ def no_zero_point_test():
     verify(ref_func, qnn_func, data_shape, data_dtype,
             kernel_shape, kernel_dtype)
 
-def kernel_zero_point_test():
+def test_kernel_zero_point():
     # uint8 input
     data_shape = (2, 4, 2, 4)
     data_dtype = 'uint8'
@@ -215,6 +231,8 @@ def kernel_zero_point_test():
                                    kernel_dtype=kernel_dtype,
                                    input_zero_point=0,
                                    kernel_zero_point=1,
+                                   input_scale=1.0,
+                                   kernel_scale=1.0,
                                    kernel_size=(2, 2),
                                    padding=(0, 0),
                                    strides=(1, 1),
@@ -236,6 +254,8 @@ def kernel_zero_point_test():
                                    kernel_dtype=kernel_dtype,
                                    input_zero_point=0,
                                    kernel_zero_point=5,
+                                   input_scale=1.0,
+                                   kernel_scale=1.0,
                                    kernel_size=(2, 2),
                                    padding=(0, 0),
                                    strides=(1, 1),
@@ -247,7 +267,7 @@ def kernel_zero_point_test():
             kernel_shape, kernel_dtype)
 
 
-def input_zero_point_test():
+def test_input_zero_point():
     # uint8 input
     data_shape = (2, 4, 2, 4)
     data_dtype = 'uint8'
@@ -259,6 +279,8 @@ def input_zero_point_test():
                                    kernel_dtype=kernel_dtype,
                                    input_zero_point=5,
                                    kernel_zero_point=0,
+                                   input_scale=1.0,
+                                   kernel_scale=1.0,
                                    kernel_size=(2, 2),
                                    padding=(0, 0),
                                    strides=(1, 1),
@@ -280,6 +302,8 @@ def input_zero_point_test():
                                    kernel_dtype=kernel_dtype,
                                    input_zero_point=5,
                                    kernel_zero_point=0,
+                                   input_scale=1.0,
+                                   kernel_scale=1.0,
                                    kernel_size=(2, 2),
                                    padding=(0, 0),
                                    strides=(1, 1),
@@ -290,7 +314,7 @@ def input_zero_point_test():
     verify(ref_func, qnn_func, data_shape, data_dtype,
             kernel_shape, kernel_dtype)
 
-def both_zero_point_test():
+def test_both_zero_point():
     # uint8 input
     data_shape = (2, 4, 2, 4)
     data_dtype = 'uint8'
@@ -302,6 +326,8 @@ def both_zero_point_test():
                                    kernel_dtype=kernel_dtype,
                                    input_zero_point=5,
                                    kernel_zero_point=3,
+                                   input_scale=1.0,
+                                   kernel_scale=1.0,
                                    kernel_size=(2, 2),
                                    padding=(0, 0),
                                    strides=(1, 1),
@@ -323,6 +349,8 @@ def both_zero_point_test():
                                    kernel_dtype=kernel_dtype,
                                    input_zero_point=5,
                                    kernel_zero_point=3,
+                                   input_scale=1.0,
+                                   kernel_scale=1.0,
                                    kernel_size=(2, 2),
                                    padding=(0, 0),
                                    strides=(1, 1),
@@ -333,7 +361,7 @@ def both_zero_point_test():
     verify(ref_func, qnn_func, data_shape, data_dtype,
             kernel_shape, kernel_dtype)
 
-def layout_test():
+def test_layout():
     # uint8 input
     data_shape = (2, 2, 4, 4) # NHWC
     data_dtype = 'uint8'
@@ -345,6 +373,8 @@ def layout_test():
                                    kernel_dtype=kernel_dtype,
                                    input_zero_point=5,
                                    kernel_zero_point=3,
+                                   input_scale=1.0,
+                                   kernel_scale=1.0,
                                    kernel_size=(2, 2),
                                    padding=(0, 0),
                                    strides=(1, 1),
@@ -366,6 +396,8 @@ def layout_test():
                                    kernel_dtype=kernel_dtype,
                                    input_zero_point=5,
                                    kernel_zero_point=3,
+                                   input_scale=1.0,
+                                   kernel_scale=1.0,
                                    kernel_size=(2, 2),
                                    padding=(0, 0),
                                    strides=(1, 1),
@@ -378,7 +410,7 @@ def layout_test():
 
 
 
-def padding_test():
+def test_padding():
     # uint8 input
     data_shape = (1, 4, 2, 2)
     data_dtype = 'uint8'
@@ -390,6 +422,8 @@ def padding_test():
                                    kernel_dtype=kernel_dtype,
                                    input_zero_point=8,
                                    kernel_zero_point=5,
+                                   input_scale=1.0,
+                                   kernel_scale=1.0,
                                    kernel_size=(2, 2),
                                    padding=(1, 1),
                                    strides=(1, 1),
@@ -411,6 +445,8 @@ def padding_test():
                                    kernel_dtype=kernel_dtype,
                                    input_zero_point=8,
                                    kernel_zero_point=3,
+                                   input_scale=1.0,
+                                   kernel_scale=1.0,
                                    kernel_size=(2, 2),
                                    padding=(1, 1),
                                    strides=(1, 1),
@@ -421,7 +457,7 @@ def padding_test():
     verify(ref_func, qnn_func, data_shape, data_dtype,
             kernel_shape, kernel_dtype)
 
-def dilation_test():
+def test_dilation():
     # uint8 input
     data_shape = (2, 4, 4, 4)
     data_dtype = 'uint8'
@@ -433,6 +469,8 @@ def dilation_test():
                                    kernel_dtype=kernel_dtype,
                                    input_zero_point=5,
                                    kernel_zero_point=3,
+                                   input_scale=1.0,
+                                   kernel_scale=1.0,
                                    kernel_size=(2, 2),
                                    padding=(0, 0),
                                    strides=(1, 1),
@@ -444,7 +482,7 @@ def dilation_test():
             kernel_shape, kernel_dtype)
 
 
-def const_folding_test():
+def test_const_folding():
     data_shape = (2, 4, 2, 4)
     data_dtype = 'uint8'
     kernel_shape = (3, 4, 2, 2)
@@ -460,6 +498,8 @@ def const_folding_test():
                             input_zero_point=8,
                             kernel_zero_point=3,
                             kernel_size=(2, 2),
+                            input_scale=1.0,
+                            kernel_scale=1.0,
                             padding=(0, 0),
                             strides=(1, 1),
                             dilation=(1, 1),
@@ -470,7 +510,7 @@ def const_folding_test():
     folded_func = folded_mod["main"]
     assert "reshape" not in folded_func.astext()
 
-def kernel_size_1x1_test():
+def test_kernel_size_1x1():
     # uint8 input
     data_shape = (2, 4, 2, 4)
     data_dtype = 'uint8'
@@ -482,6 +522,8 @@ def kernel_size_1x1_test():
                                    kernel_dtype=kernel_dtype,
                                    input_zero_point=5,
                                    kernel_zero_point=3,
+                                   input_scale=1.0,
+                                   kernel_scale=1.0,
                                    kernel_size=(1, 1),
                                    padding=(0, 0),
                                    strides=(1, 1),
@@ -493,7 +535,7 @@ def kernel_size_1x1_test():
     verify(ref_func, qnn_func, data_shape, data_dtype,
             kernel_shape, kernel_dtype)
 
-def tflite_large_irregular_test():
+def test_tflite_large_irregular():
     # uint8 input
     data_shape = (1, 1024, 1, 1)
     data_dtype = 'uint8'
@@ -505,6 +547,8 @@ def tflite_large_irregular_test():
                                    kernel_dtype=kernel_dtype,
                                    input_zero_point=127,
                                    kernel_zero_point=127,
+                                   input_scale=1.0,
+                                   kernel_scale=1.0,
                                    kernel_size=(1, 1),
                                    padding=(0, 0),
                                    strides=(1, 1),
@@ -526,7 +570,7 @@ def tflite_large_irregular_test():
     golden_output = np.full((1, 1001, 1, 1), 0).astype('uint8')
     np.testing.assert_equal(qnn_output, golden_output)
 
-def tflite_output_multiplier_greater_than_one():
+def test_tflite_output_multiplier_greater_than_one():
     # uint8 input
     data_shape = (2, 1, 2, 4)
     data_dtype = 'uint8'
@@ -536,6 +580,8 @@ def tflite_output_multiplier_greater_than_one():
                                    data_dtype=data_dtype,
                                    kernel_shape=kernel_shape,
                                    kernel_dtype=kernel_dtype,
+                                   input_scale=1.0,
+                                   kernel_scale=1.0,
                                    input_zero_point=128,
                                    kernel_zero_point=128,
                                    kernel_size=(2, 2),
@@ -570,7 +616,7 @@ def tflite_output_multiplier_greater_than_one():
                               0, 0)).reshape(2, 3, 1, 2)
     np.testing.assert_equal(qnn_output, golden_output)
 
-def tflite_anistropic_strides():
+def test_tflite_anistropic_strides():
     # uint8 input
     data_shape = (1, 1, 3, 6)
     data_dtype = 'uint8'
@@ -582,6 +628,8 @@ def tflite_anistropic_strides():
                                    kernel_dtype=kernel_dtype,
                                    input_zero_point=127,
                                    kernel_zero_point=127,
+                                   input_scale=1.0,
+                                   kernel_scale=1.0,
                                    kernel_size=(2, 2),
                                    padding=(0, 0),
                                    strides=(1, 3),
@@ -607,7 +655,7 @@ def tflite_anistropic_strides():
     golden_output = np.array((124, -92, 164, -132)).reshape(1, 1, 2, 2)
     np.testing.assert_equal(qnn_output, golden_output)
 
-def broadcast_layout_test():
+def test_broadcast_layout():
     # Test broadcast support for NHWC layout.
     data_shape = (1, 229, 229, 3) # NHWC
     data_dtype = 'uint8'
@@ -619,6 +667,8 @@ def broadcast_layout_test():
                             kernel_dtype=kernel_dtype,
                             input_zero_point=8,
                             kernel_zero_point=3,
+                            input_scale=1.0,
+                            kernel_scale=1.0,
                             kernel_size=(7, 7),
                             padding=(1, 1),
                             strides=(1, 1),
@@ -641,16 +691,16 @@ def broadcast_layout_test():
         graph, lib, params = relay.build(mod, "llvm -mcpu=skylake-avx512")
 
 if __name__ == "__main__":
-    no_zero_point_test()
-    input_zero_point_test()
-    kernel_zero_point_test()
-    both_zero_point_test()
-    layout_test()
-    padding_test()
-    dilation_test()
-    const_folding_test()
-    kernel_size_1x1_test()
-    tflite_large_irregular_test()
-    tflite_output_multiplier_greater_than_one()
-    tflite_anistropic_strides()
-    broadcast_layout_test()
+    test_no_zero_point()
+    test_input_zero_point()
+    test_kernel_zero_point()
+    test_both_zero_point()
+    test_layout()
+    test_padding()
+    test_dilation()
+    test_const_folding()
+    test_kernel_size_1x1()
+    test_tflite_large_irregular()
+    test_broadcast_layout()
+    test_tflite_output_multiplier_greater_than_one()
+    test_tflite_anistropic_strides()
