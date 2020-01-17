@@ -76,7 +76,7 @@ class VarNode : public PrimExprNode {
    */
   std::string name_hint;
 
-  void VisitAttrs(AttrVisitor* v) {
+  virtual void VisitAttrs(AttrVisitor* v) {
     v->Visit("dtype", &dtype);
     v->Visit("name", &name_hint);
   }
@@ -332,12 +332,23 @@ enum IterVarType : int {
  * \brief Iteration Variable,
  *  represents an iteration over an integer interval.
  */
-class IterVar : public ObjectRef {
+class IterVar : public Var {
  public:
   // construct a new iter var without a domain
   IterVar() {}
   // construct from shared ptr.
-  explicit IterVar(ObjectPtr<Object> n) : ObjectRef(n) {}
+  explicit IterVar(ObjectPtr<Object> n) : Var(n) {}
+  /*! \brief constructor.
+   * \param dom interval of the variable.
+   * \param iter_type indicate the iteration type of the variable.
+   * \param name_hint variable name
+   * \param t data type
+   * \param thread_tag additional tag on the iteration variable.
+   */
+  TVM_DLL IterVar(Range dom, IterVarType iter_type,
+                  std::string name_hint = "v",
+                  DataType t = DataType::Int(32),
+                  std::string thread_tag = "");
   /*!
    * \brief access the internal node container
    * \return the pointer to the internal node container
@@ -380,15 +391,23 @@ TVM_DLL void Dump(const ObjectRef& node);
  * \brief An iteration variable representing an iteration
  *  over a one dimensional interval.
  */
-class IterVarNode : public Object {
+class IterVarNode : public VarNode {
  public:
+  /*! \brief constructor.
+   * \param dtype data type
+   * \param name_hint variable name
+   * \param dom interval of the variable.
+   * \param iter_type indicate the iteration type of the variable.
+   * \param thread_tag additional tag on the iteration variable.
+   */
+  IterVarNode(DataType dtype, std::string name_hint,
+              Range dom, IterVarType iter_type,
+              std::string thread_tag);
   /*!
    * \brief the domain of iteration, if known, can be None
    *  For the intermediate schedule node, before schedule.
    */
   Range dom;
-  /*! \brief The looping variable */
-  Var var;
   /*! \brief The type of the IterVar */
   IterVarType iter_type;
   /*!
@@ -398,15 +417,12 @@ class IterVarNode : public Object {
   std::string thread_tag;
 
   void VisitAttrs(AttrVisitor* v) {
+    v->Visit("dtype", &dtype);
+    v->Visit("name", &name_hint);
     v->Visit("dom", &dom);
-    v->Visit("var", &var);
     v->Visit("iter_type", &iter_type);
     v->Visit("thread_tag", &thread_tag);
   }
-
-  TVM_DLL static IterVar make(Range dom, Var var,
-                              IterVarType iter_type,
-                              std::string thread_tag = "");
 
   static constexpr const char* _type_key = "IterVar";
   TVM_DECLARE_FINAL_OBJECT_INFO(IterVarNode, Object);

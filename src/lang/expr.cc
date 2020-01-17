@@ -62,26 +62,28 @@ Range Range::make_by_min_extent(PrimExpr min, PrimExpr extent) {
   return Range(make_object<RangeNode>(min, extent));
 }
 
-IterVar IterVarNode::make(Range dom,
-                          Var var,
-                          IterVarType t,
-                          std::string thread_tag) {
-  ObjectPtr<IterVarNode> n = make_object<IterVarNode>();
-  n->dom = dom;
-  n->var = var;
-  n->iter_type = t;
-  n->thread_tag = thread_tag;
-  return IterVar(n);
+IterVarNode::IterVarNode(DataType dtype, std::string name_hint,
+                         Range dom, IterVarType iter_type,
+                         std::string thread_tag) : VarNode(dtype, std::move(name_hint)) {
+  this->dom = dom;
+  this->iter_type = iter_type;
+  this->thread_tag = std::move(thread_tag);
 }
 
+IterVar::IterVar(Range dom,
+                 IterVarType iter_type,
+                 std::string name_hint,
+                 DataType t,
+                 std::string thread_tag)
+    : IterVar(make_object<IterVarNode>(
+        t, name_hint, dom, iter_type, thread_tag)) {}
+
 IterVar thread_axis(Range dom, std::string tag) {
-  return IterVarNode::make(
-      dom, Var(tag), kThreadIndex, tag);
+  return IterVar(dom, kThreadIndex, std::move(tag), DataType::Int(32));
 }
 
 IterVar reduce_axis(Range dom, std::string name) {
-  return IterVarNode::make(
-      dom, Var(name), kCommReduce);
+  return IterVar(dom, kCommReduce, name);
 }
 
 void Dump(const ObjectRef& n) {
@@ -106,8 +108,8 @@ TVM_STATIC_IR_FUNCTOR(NodePrinter, vtable)
 .set_dispatch<IterVarNode>([](const ObjectRef& node, NodePrinter* p) {
     auto* op = static_cast<const IterVarNode*>(node.get());
     p->stream << "iter_var(";
-    if (op->var->name_hint.length() != 0) {
-      p->stream  << op->var->name_hint << ", ";
+    if (op->name_hint.length() != 0) {
+      p->stream  << op->name_hint << ", ";
     }
     if (op->dom.defined()) {
       p->stream << op->dom;
