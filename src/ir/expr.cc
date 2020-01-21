@@ -36,7 +36,7 @@ namespace tvm {
 PrimExpr PrimExpr::FromObject_(ObjectPtr<Object> ptr) {
   using runtime::ObjectTypeChecker;
   if (ptr->IsInstance<IterVarNode>()) {
-    return IterVar(ptr)->var;
+    return IterVar(ptr);
   }
   if (ptr->IsInstance<top::TensorNode>()) {
     return top::Tensor(ptr)();

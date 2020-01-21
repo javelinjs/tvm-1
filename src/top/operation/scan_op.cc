@@ -98,9 +98,8 @@ Operation ScanOpNode::make(std::string name,
         std::ostringstream spatial_name;
         spatial_name << name << ".out" << i << ".i" << k;
         n->spatial_axis_.push_back(
-            IterVarNode::make(
-                Range::make_by_min_extent(0, update[i]->shape[k]),
-                Var(spatial_name.str()), kOpaque));
+            IterVar(Range::make_by_min_extent(0, update[i]->shape[k]),
+                kOpaque, spatial_name.str()));
       }
     }
 
@@ -195,16 +194,16 @@ void ScanOpNode::PropBoundToInputs(
           Range::make_by_min_extent(0, this->init[i]->shape[0])));
     }
     if (update_dom) {
-      update_dom->data[0].push_back(dom_map.at(this->scan_axis->var.get()));
+      update_dom->data[0].push_back(dom_map.at(this->scan_axis.get()));
     }
     // The update dimensions
     for (size_t k = 1; k < this->update[i]->shape.size(); ++k, ++sp_idx) {
       IterVar sp_ax = this->spatial_axis_[sp_idx];
       if (init_dom) {
-        init_dom->data[k].push_back(dom_map.at(sp_ax->var.get()));
+        init_dom->data[k].push_back(dom_map.at(sp_ax.get()));
       }
       if (update_dom) {
-        update_dom->data[k].push_back(dom_map.at(sp_ax->var.get()));
+        update_dom->data[k].push_back(dom_map.at(sp_ax.get()));
       }
     }
   }
@@ -282,7 +281,7 @@ Stmt ScanOpNode::BuildProvide(
     bool debug_keep_trivial_loop) const {
   CHECK_EQ(stage->op.operator->(), this);
   Stmt provide = AttrStmtNode::make(
-      stage->op, attr::scan_update_scope, this->scan_axis->var,
+      stage->op, attr::scan_update_scope, this->scan_axis,
       EvaluateNode::make(0));
   Stmt init = AttrStmtNode::make(
       stage->op, attr::scan_init_scope, 0,

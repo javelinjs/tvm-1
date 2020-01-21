@@ -147,10 +147,10 @@ void HybridOpNode::PropBoundToInputs(
 void HybridOpNode::GatherBound(
     const Operation &self,
     const std::unordered_map<Tensor, TensorDom> &tensor_dom,
-    std::unordered_map<IterVar, Range>* out_dom_map) const {
+    std::unordered_map<const VarNode*, Range>* out_dom_map) const {
   for (auto iter_var : axis) {
-    CHECK(!out_dom_map->count(iter_var));
-    out_dom_map->operator[](iter_var) = iter_var->dom;
+    CHECK(!out_dom_map->count(iter_var.get()));
+    out_dom_map->operator[](iter_var.get()) = iter_var->dom;
   }
 }
 
@@ -229,7 +229,7 @@ Stmt ApplyLoopShapes(const Stage &stage,
     LoopSpliter(const SplitNode *split,
                 const std::unordered_map<IterVar, Range> &dom_map) :
       factor(split->factor), splitted(false) {
-      parent = split->parent->var.get();
+      parent = split->parent.get();
 
       auto &inner_ = split->inner;
       CHECK(dom_map.count(inner_));
@@ -241,8 +241,8 @@ Stmt ApplyLoopShapes(const Stage &stage,
       auto &outer_dom = dom_map.find(outer_)->second;
       CHECK(is_const_int(outer_dom->min, 0));
 
-      inner = IterVarNode::make(inner_dom, inner_->var, inner_->iter_type);
-      outer = IterVarNode::make(outer_dom, outer_->var, outer_->iter_type);
+      inner = IterVar(inner_dom, inner_->iter_type, inner_->name_hint, inner_->dtype);
+      outer = IterVar(outer_dom, outer_->iter_type, outer_->name_hint, outer_->dtype);
     }
 
     Stmt VisitStmt_(const ForNode *op) final {
@@ -252,9 +252,9 @@ Stmt ApplyLoopShapes(const Stage &stage,
         Stmt ret = ir::Substitute(op->body, rmap);
         PrimExpr cond = likely(outer * factor < (op->extent - inner));
         ret = IfThenElseNode::make(cond, ret);
-        ret = ForNode::make(inner->var, PrimExpr(0), inner->dom->extent,
+        ret = ForNode::make(inner, PrimExpr(0), inner->dom->extent,
                         IterVarTypeToForType(inner->iter_type), op->device_api, ret);
-        ret = ForNode::make(outer->var, PrimExpr(0), outer->dom->extent,
+        ret = ForNode::make(outer, PrimExpr(0), outer->dom->extent,
                         IterVarTypeToForType(outer->iter_type), op->device_api, ret);
         splitted = true;
         return ret;
@@ -273,8 +273,8 @@ Stmt ApplyLoopShapes(const Stage &stage,
    public:
     bool fused;
     explicit LoopFuser(const FuseNode *fuse_)
-      : parent(fuse_->fused), inner(fuse_->inner->var.get()),
-        outer(fuse_->outer->var.get()), under_outer(false),
+      : parent(fuse_->fused), inner(fuse_->inner.get()),
+        outer(fuse_->outer.get()), under_outer(false),
         extent(0), fused(false) {}
 
     // TODO(@were): Handle imperfect loops
@@ -293,7 +293,7 @@ Stmt ApplyLoopShapes(const Stage &stage,
         rmap[op->loop_var.get()] = indexdiv(parent, extent);
         body = ir::Substitute(body, rmap);
         under_outer = false;
-        return ForNode::make(parent->var, PrimExpr(0), extent * op->extent,
+        return ForNode::make(parent, PrimExpr(0), extent * op->extent,
                          op->for_type, op->device_api, body);
       } else if (under_outer) {
         Stmt body = this->VisitStmt(op->body);
@@ -358,7 +358,7 @@ Stmt ApplyLoopAnnotations(const Stage &stage,
     int found = 0;
 
     const IterVar &actual = rebased.count(iter_var) ? rebased.find(iter_var)->second : iter_var;
-    const VarNode *var = actual->var.get();
+    const VarNode *var = actual.get();
     ForType expected = IterVarTypeToForType(iter_var->iter_type);
     IterVarAttr attr;
     if (stage->iter_var_attrs.count(iter_var)) {
@@ -403,7 +403,7 @@ Stmt ApplyLoopOrder(const Stage &stage,
     const IterVar &required = rebased.count(iter_var) ? rebased.find(iter_var)->second : iter_var;
     CHECK(required->dom.defined() || dom_map.count(required)) << required << "\n";
     reorder[current] = required;
-    if (current != required->var.get()) {
+    if (current != required.get()) {
       need_reorder = true;
     }
   }
@@ -424,7 +424,7 @@ Stmt ApplyLoopOrder(const Stage &stage,
       Stmt body_ = this->VisitStmt(op->body);
       CHECK(reorder.count(op->loop_var.get()));
       auto target = reorder.find(op->loop_var.get())->second;
-      if (body_.same_as(op->body) && op->loop_var.get() == target->var.get())
+      if (body_.same_as(op->body) && op->loop_var.get() == target.get())
         return GetRef<Stmt>(op);
       const Stmt &body = op->body.same_as(body_) ? op->body : body_;
       ForType for_type = IterVarTypeToForType(target->iter_type);
@@ -432,7 +432,7 @@ Stmt ApplyLoopOrder(const Stage &stage,
         for_type = IterVarTypeToForType(stage->iter_var_attrs[target]->iter_type);
       }
       const Range &range = target->dom.defined() ? target->dom : dom_map.find(target)->second;
-      return ForNode::make(target->var, range->min, range->extent,
+      return ForNode::make(target, range->min, range->extent,
                        for_type, DeviceAPI::None, body);
     }
   };
@@ -468,7 +468,7 @@ std::vector<IterVar> GatherLoopVars(Stmt stmt) {
     if (const ForNode *op = node.as<ForNode>()) {
       Var loop_var(op->loop_var);
       Range dom = Range::make_by_min_extent(op->min, op->extent);
-      res_.push_back(IterVarNode::make(dom, loop_var, ForTypeToIterVarType(op->for_type)));
+      res_.push_back(IterVar(dom, ForTypeToIterVarType(op->for_type), loop_var->name_hint, loop_var->dtype));
     }
   });
   std::reverse(res_.begin(), res_.end());

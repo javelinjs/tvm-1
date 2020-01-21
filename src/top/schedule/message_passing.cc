@@ -32,14 +32,14 @@ namespace top {
 
 using namespace ir;
 
-void Update(std::unordered_map<IterVar, Range>* p_state,
+void Update(std::unordered_map<const IterVarNode*, Range>* p_state,
             const IterVar& iv,
             Range r,
             arith::Analyzer* analyzer) {
-  auto it = p_state->find(iv);
+  auto it = p_state->find(iv.get());
   if (it == p_state->end()) {
-    (*p_state)[iv] = r;
-    analyzer->Bind(iv->var, r);
+    (*p_state)[iv.get()] = r;
+    analyzer->Bind(iv, r);
   } else {
     bool match = is_zero(it->second->min) &&
         analyzer->CanProve(r->extent - it->second->extent == 0);
@@ -52,7 +52,7 @@ void Update(std::unordered_map<IterVar, Range>* p_state,
 }
 
 void PassDownDomain(const Stage& stage,
-                    std::unordered_map<IterVar, Range>* p_state,
+                    std::unordered_map<const IterVarNode*, Range>* p_state,
                     arith::Analyzer* actx,
                     bool allow_missing) {
   auto ceil_div = [actx](PrimExpr a, PrimExpr b) {
@@ -66,12 +66,12 @@ void PassDownDomain(const Stage& stage,
   // forwar iteration on relations
   for (IterVarRelation rel : stage->relations) {
     if (const SplitNode* r = rel.as<SplitNode>()) {
-      if (!state.count(r->parent)) {
+      if (!state.count(r->parent.get())) {
         CHECK(allow_missing);
         continue;
       }
-      CHECK(!state.count(r->inner));
-      const Range& range_parent = state.at(r->parent);
+      CHECK(!state.count(r->inner.get()));
+      const Range& range_parent = state.at(r->parent.get());
       if (r->factor.defined()) {
         Update(p_state, r->inner,
                Range::make_by_min_extent(0, r->factor), actx);
@@ -85,22 +85,22 @@ void PassDownDomain(const Stage& stage,
                    0, ceil_div(range_parent->extent, r->nparts)), actx);
       }
     } else if (const FuseNode* r = rel.as<FuseNode>()) {
-      if (!state.count(r->outer) || !state.count(r->inner)) {
+      if (!state.count(r->outer.get()) || !state.count(r->inner.get())) {
         CHECK(allow_missing);
         continue;
       }
-      const Range& range_outer = state.at(r->outer);
-      const Range& range_inner = state.at(r->inner);
-      state[r->fused] = Range::make_by_min_extent(
+      const Range& range_outer = state.at(r->outer.get());
+      const Range& range_inner = state.at(r->inner.get());
+      state[r->fused.get()] = Range::make_by_min_extent(
           0, range_outer->extent * range_inner->extent);
     } else if (const RebaseNode* r = rel.as<RebaseNode>()) {
-      if (!state.count(r->parent)) {
+      if (!state.count(r->parent.get())) {
         CHECK(allow_missing);
         continue;
       }
       Update(p_state, r->rebased,
              Range::make_by_min_extent(
-                 0, state.at(r->parent)->extent), actx);
+                 0, state.at(r->parent.get())->extent), actx);
     } else if (const SingletonNode* s = rel.as<SingletonNode>()) {
       Update(p_state, s->iter, Range::make_by_min_extent(0, 1), actx);
     } else {
@@ -110,63 +110,63 @@ void PassDownDomain(const Stage& stage,
   // update the extents of binded threads.
   for (auto kv : stage->iter_var_attrs) {
     if (kv.second->bind_thread.defined()) {
-      CHECK(state.count(kv.first));
-      Update(p_state, kv.second->bind_thread, state.at(kv.first), actx);
+      CHECK(state.count(kv.first.get()));
+      Update(p_state, kv.second->bind_thread, state.at(kv.first.get()), actx);
     }
   }
 }
 
 void PassUpIndex(const Stage& stage,
                  const Map<IterVar, Range>& dom_map,
-                 std::unordered_map<IterVar, PrimExpr>* p_state,
+                 std::unordered_map<const IterVarNode*, PrimExpr>* p_state,
                  bool allow_missing) {
   auto& state = *p_state;
   for (size_t i = stage->relations.size(); i != 0; --i) {
     IterVarRelation rel = stage->relations[i - 1];
     if (const SplitNode* s = rel.as<SplitNode>()) {
-      if (!state.count(s->outer) || !state.count(s->inner)) {
+      if (!state.count(s->outer.get()) || !state.count(s->inner.get())) {
         CHECK(allow_missing);
         continue;
       }
-      PrimExpr outer = state.at(s->outer);
-      PrimExpr inner = state.at(s->inner);
+      PrimExpr outer = state.at(s->outer.get());
+      PrimExpr inner = state.at(s->inner.get());
       PrimExpr factor = dom_map.at(s->inner)->extent;
       PrimExpr parent_min = dom_map.at(s->parent)->min;
-      state[s->parent] = inner + outer * factor;
+      state[s->parent.get()] = inner + outer * factor;
       // add min if they exist
       if (!is_zero(parent_min)) {
-        state[s->parent] = state[s->parent] + parent_min;
+        state[s->parent.get()] = state[s->parent.get()] + parent_min;
       }
     } else if (const FuseNode* s = rel.as<FuseNode>()) {
-      if (!state.count(s->fused)) {
+      if (!state.count(s->fused.get())) {
         CHECK(allow_missing);
         continue;
       }
-      PrimExpr value = state.at(s->fused);
+      PrimExpr value = state.at(s->fused.get());
       PrimExpr factor = dom_map.at(s->inner)->extent;
       PrimExpr outer_min = dom_map.at(s->outer)->min;
       PrimExpr inner_min = dom_map.at(s->inner)->min;
-      state[s->outer] = indexdiv(value, factor);
-      state[s->inner] = indexmod(value, factor);
+      state[s->outer.get()] = indexdiv(value, factor);
+      state[s->inner.get()] = indexmod(value, factor);
       // add min if they exist
       if (!is_zero(outer_min)) {
-        state[s->outer] = state[s->outer] + outer_min;
+        state[s->outer.get()] = state[s->outer.get()] + outer_min;
       }
       if (!is_zero(inner_min)) {
-        state[s->inner] = state[s->inner] + inner_min;
+        state[s->inner.get()] = state[s->inner.get()] + inner_min;
       }
     } else if (const RebaseNode* s = rel.as<RebaseNode>()) {
-      if (!state.count(s->rebased)) {
+      if (!state.count(s->rebased.get())) {
         CHECK(allow_missing);
         continue;
       }
-      PrimExpr value = state.at(s->rebased);
+      PrimExpr value = state.at(s->rebased.get());
       PrimExpr parent_min = dom_map.at(s->parent)->min;
       // add min if they exist
       if (!is_zero(parent_min)) {
-        state[s->parent] = value + parent_min;
+        state[s->parent.get()] = value + parent_min;
       } else {
-        state[s->parent] = value;
+        state[s->parent.get()] = value;
       }
     } else if (rel.as<SingletonNode>()) {
     } else {
@@ -215,7 +215,7 @@ void PassDownIndex(const Stage& stage,
       CHECK(is_zero(parent_min));
       state[s->rebased] = value;
     } else if (const SingletonNode* s = rel.as<SingletonNode>()) {
-      state[s->iter] = make_zero(s->iter->var.dtype());
+      state[s->iter] = make_zero(s->iter.dtype());
     } else {
       LOG(FATAL) << "unknown relation type";
     }
@@ -224,48 +224,48 @@ void PassDownIndex(const Stage& stage,
 
 // Domain message passing.
 void PassUpDomain(const SplitNode* s,
-                  const std::unordered_map<IterVar, Range>& dom_map,
+                  const std::unordered_map<const IterVarNode*, Range>& dom_map,
                   const IntSet& outer,
                   const IntSet& inner,
                   IntSet* parent) {
-  if (dom_map.count(s->outer) &&
-      dom_map.count(s->inner) &&
-      dom_map.count(s->parent) &&
-      outer.match_range(dom_map.at(s->outer)) &&
-      inner.match_range(dom_map.at(s->inner))) {
-    *parent = IntSet::range(dom_map.at(s->parent));
+  if (dom_map.count(s->outer.get()) &&
+      dom_map.count(s->inner.get()) &&
+      dom_map.count(s->parent.get()) &&
+      outer.match_range(dom_map.at(s->outer.get())) &&
+      inner.match_range(dom_map.at(s->inner.get()))) {
+    *parent = IntSet::range(dom_map.at(s->parent.get()));
     return;
   }
-  PrimExpr factor = dom_map.at(s->inner)->extent;
-  PrimExpr parent_min = dom_map.at(s->parent)->min;
+  PrimExpr factor = dom_map.at(s->inner.get())->extent;
+  PrimExpr parent_min = dom_map.at(s->parent.get())->min;
   CHECK(outer.defined());
   CHECK(inner.defined());
   CHECK(factor.defined());
   *parent = arith::EvalSet(
-      s->outer->var * factor + s->inner->var + parent_min,
+      s->outer * factor + s->inner + parent_min,
       {{s->outer, outer}, {s->inner, inner}});
 }
 
 void PassUpDomain(const FuseNode* s,
-                  const std::unordered_map<IterVar, Range>& dom_map,
+                  const std::unordered_map<const IterVarNode*, Range>& dom_map,
                   const IntSet& fused,
                   IntSet* outer,
                   IntSet* inner) {
-  CHECK(dom_map.count(s->outer));
-  CHECK(dom_map.count(s->inner));
-  CHECK(dom_map.count(s->fused));
+  CHECK(dom_map.count(s->outer.get()));
+  CHECK(dom_map.count(s->inner.get()));
+  CHECK(dom_map.count(s->fused.get()));
 
-  if (fused.match_range(dom_map.at(s->fused))) {
-    *outer = IntSet::range(dom_map.at(s->outer));
-    *inner = IntSet::range(dom_map.at(s->inner));
+  if (fused.match_range(dom_map.at(s->fused.get()))) {
+    *outer = IntSet::range(dom_map.at(s->outer.get()));
+    *inner = IntSet::range(dom_map.at(s->inner.get()));
     return;
   }
-  PrimExpr outer_min = dom_map.at(s->outer)->min;
-  PrimExpr inner_min = dom_map.at(s->inner)->min;
+  PrimExpr outer_min = dom_map.at(s->outer.get())->min;
+  PrimExpr inner_min = dom_map.at(s->inner.get())->min;
 
   if (fused.is_single_point()) {
     PrimExpr value = fused.point_value();
-    PrimExpr factor = dom_map.at(s->inner)->extent;
+    PrimExpr factor = dom_map.at(s->inner.get())->extent;
     PrimExpr v_outer  = indexdiv(value, factor);
     PrimExpr v_inner  = indexmod(value, factor);
     if (!is_zero(outer_min)) v_outer = v_outer + outer_min;
@@ -274,7 +274,7 @@ void PassUpDomain(const FuseNode* s,
     *inner = IntSet::single_point(v_inner);
   } else {
     PrimExpr fused_extent = (fused.max() - fused.min() + 1);
-    PrimExpr inner_extent = dom_map.at(s->inner)->extent;
+    PrimExpr inner_extent = dom_map.at(s->inner.get())->extent;
     *outer = IntSet::interval(
         outer_min + indexdiv(fused.min(), inner_extent),
         outer_min + indexdiv(fused.max(), inner_extent));
@@ -290,28 +290,28 @@ void PassUpDomain(const FuseNode* s,
         LOG(WARNING) <<
           "fused and original axes are not aligned, this may cause redundant computations";
       }
-      *inner = IntSet::range(dom_map.at(s->inner));
+      *inner = IntSet::range(dom_map.at(s->inner.get()));
     }
     return;
   }
 }
 
 void PassUpDomain(const RebaseNode* s,
-                  const std::unordered_map<IterVar, Range>& dom_map,
+                  const std::unordered_map<const IterVarNode*, Range>& dom_map,
                   const IntSet& rebased,
                   IntSet* parent) {
-  CHECK(dom_map.count(s->parent));
-  if (rebased.match_range(dom_map.at(s->rebased))) {
-    *parent = IntSet::range(dom_map.at(s->parent));
+  CHECK(dom_map.count(s->parent.get()));
+  if (rebased.match_range(dom_map.at(s->rebased.get()))) {
+    *parent = IntSet::range(dom_map.at(s->parent.get()));
     return;
   }
-  PrimExpr parent_min = dom_map.at(s->parent)->min;
-  *parent = arith::EvalSet(s->rebased->var + parent_min,
+  PrimExpr parent_min = dom_map.at(s->parent.get())->min;
+  *parent = arith::EvalSet(s->rebased + parent_min,
                            {{s->rebased, rebased}});
 }
 
 void PassUpDomain(const Stage& stage,
-                  const std::unordered_map<IterVar, Range>& dom_map,
+                  const std::unordered_map<const IterVarNode*, Range>& dom_map,
                   std::unordered_map<IterVar, IntSet>* p_state) {
   auto& state = *p_state;
   for (size_t i = stage->relations.size(); i != 0; --i) {
@@ -344,45 +344,45 @@ void PassUpDomain(const Stage& stage,
 
 // Pass up bit mask with or relation.
 void PassUpBitMaskOr(const Stage& stage,
-                     std::unordered_map<IterVar, int>* p_state,
+                     std::unordered_map<const IterVarNode*, int>* p_state,
                      bool allow_missing) {
   auto& state = *p_state;
   for (size_t i = stage->relations.size(); i != 0; --i) {
     IterVarRelation rel = stage->relations[i - 1];
     if (const SplitNode* s = rel.as<SplitNode>()) {
-      if (!state.count(s->inner) && !state.count(s->outer)) {
+      if (!state.count(s->inner.get()) && !state.count(s->outer.get())) {
         CHECK(allow_missing);
         continue;
       }
       int res = 0;
-      if (!state.count(s->parent)) res |= state[s->parent];
-      if (!state.count(s->inner)) res |= state[s->inner];
-      if (!state.count(s->outer)) res |= state[s->outer];
-      state[s->parent] = res;
+      if (!state.count(s->parent.get())) res |= state[s->parent.get()];
+      if (!state.count(s->inner.get())) res |= state[s->inner.get()];
+      if (!state.count(s->outer.get())) res |= state[s->outer.get()];
+      state[s->parent.get()] = res;
     } else if (const FuseNode* s = rel.as<FuseNode>()) {
-      if (!state.count(s->fused)) {
+      if (!state.count(s->fused.get())) {
         CHECK(allow_missing);
         continue;
       }
-      if (!state.count(s->outer)) {
-        state[s->outer] = state[s->fused];
+      if (!state.count(s->outer.get())) {
+        state[s->outer.get()] = state[s->fused.get()];
       } else {
-        state[s->outer] |= state[s->fused];
+        state[s->outer.get()] |= state[s->fused.get()];
       }
-      if (!state.count(s->inner)) {
-        state[s->inner] = state[s->fused];
+      if (!state.count(s->inner.get())) {
+        state[s->inner.get()] = state[s->fused.get()];
       } else {
-        state[s->inner] |= state[s->fused];
+        state[s->inner.get()] |= state[s->fused.get()];
       }
     } else if (const RebaseNode* s = rel.as<RebaseNode>()) {
-      if (!state.count(s->rebased)) {
+      if (!state.count(s->rebased.get())) {
         CHECK(allow_missing);
         continue;
       }
-      if (!state.count(s->parent)) {
-        state[s->parent] = state[s->rebased];
+      if (!state.count(s->parent.get())) {
+        state[s->parent.get()] = state[s->rebased.get()];
       } else {
-        state[s->parent] |= state[s->rebased];
+        state[s->parent.get()] |= state[s->rebased.get()];
       }
     } else if (rel.as<SingletonNode>()) {
     } else {
@@ -392,47 +392,47 @@ void PassUpBitMaskOr(const Stage& stage,
 }
 
 void PassDownBitMaskOr(const Stage& stage,
-                       std::unordered_map<IterVar, int>* p_state,
+                       std::unordered_map<const IterVarNode*, int>* p_state,
                        bool allow_missing) {
   auto& state = *p_state;
   for (IterVarRelation rel : stage->relations) {
     if (const SplitNode* s = rel.as<SplitNode>()) {
-      if (!state.count(s->parent)) {
+      if (!state.count(s->parent.get())) {
         CHECK(allow_missing);
         continue;
       }
-      if (!state.count(s->outer)) {
-        state[s->outer] = state.at(s->parent);
+      if (!state.count(s->outer.get())) {
+        state[s->outer.get()] = state.at(s->parent.get());
       } else {
-        state[s->outer] |= state.at(s->parent);
+        state[s->outer.get()] |= state.at(s->parent.get());
       }
-      if (!state.count(s->inner)) {
-        state[s->inner] = state.at(s->parent);
+      if (!state.count(s->inner.get())) {
+        state[s->inner.get()] = state.at(s->parent.get());
       } else {
-        state[s->inner] |= state.at(s->parent);
+        state[s->inner.get()] |= state.at(s->parent.get());
       }
     } else if (const FuseNode* s = rel.as<FuseNode>()) {
-      if (!state.count(s->outer) && !state.count(s->inner)) {
+      if (!state.count(s->outer.get()) && !state.count(s->inner.get())) {
         CHECK(allow_missing);
         continue;
       }
       int res = 0;
-      if (state.count(s->outer)) res |= state.at(s->outer);
-      if (state.count(s->inner)) res |= state.at(s->inner);
-      if (state.count(s->fused)) res |= state.at(s->fused);
+      if (state.count(s->outer.get())) res |= state.at(s->outer.get());
+      if (state.count(s->inner.get())) res |= state.at(s->inner.get());
+      if (state.count(s->fused.get())) res |= state.at(s->fused.get());
       state[s->fused] = res;
     } else if (const RebaseNode* s = rel.as<RebaseNode>()) {
-      if (!state.count(s->parent)) {
+      if (!state.count(s->parent.get())) {
         CHECK(allow_missing);
         continue;
       }
-      if (!state.count(s->rebased)) {
-        state[s->rebased] = state.at(s->parent);
+      if (!state.count(s->rebased.get())) {
+        state[s->rebased.get()] = state.at(s->parent.get());
       } else {
-        state[s->rebased] |= state.at(s->parent);
+        state[s->rebased.get()] |= state.at(s->parent.get());
       }
     } else if (const SingletonNode* s = rel.as<SingletonNode>()) {
-      state[s->iter] = 0;
+      state[s->iter.get()] = 0;
     } else {
       LOG(FATAL) << "unknown relation type";
     }
@@ -505,7 +505,7 @@ std::vector<PrimExpr> MakeBoundCheck(
 
   // setup domain map for set analysis
   for (const auto& kv : dom_map) {
-    iset_dmap[kv.first->var.get()] = IntSet::range(kv.second);
+    iset_dmap[kv.first.get()] = IntSet::range(kv.second);
   }
 
   for (const IterVar& iv : stage->all_iter_vars) {

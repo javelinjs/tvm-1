@@ -96,14 +96,6 @@ class Var : public PrimExpr {
   TVM_DLL explicit Var(std::string name_hint = "v",
                        DataType t = DataType::Int(32));
   /*!
-   * \brief Make a new copy of var with same type, append suffix
-   * \param suffix The suffix to be appended.
-   * \return the new Var copy
-   */
-  Var copy_with_suffix(const std::string& suffix) const {
-    return Var((*this)->name_hint + suffix, (*this)->dtype);
-  }
-  /*!
    * \brief Get pointer to the internal value.
    * \return the corresponding Variable.
    */
@@ -355,9 +347,10 @@ class IterVar : public Var {
    */
   inline const IterVarNode* operator->() const;
   /*!
-   * \return the corresponding var in the IterVar.
+   * \brief Get pointer to the internal value.
+   * \return the corresponding Iter Variable.
    */
-  inline operator PrimExpr() const;
+  inline const IterVarNode* get() const;
   /*! \brief specify container node */
   using ContainerType = IterVarNode;
 };
@@ -425,16 +418,16 @@ class IterVarNode : public VarNode {
   }
 
   static constexpr const char* _type_key = "IterVar";
-  TVM_DECLARE_FINAL_OBJECT_INFO(IterVarNode, Object);
+  TVM_DECLARE_FINAL_OBJECT_INFO(IterVarNode, VarNode);
 };
 
 // inline implementations
 inline const IterVarNode* IterVar::operator->() const {
-  return static_cast<const IterVarNode*>(data_.get());
+  return get();
 }
 
-inline IterVar::operator PrimExpr() const {
-  return (*this)->var;
+inline const IterVarNode* IterVar::get() const {
+  return static_cast<const IterVarNode*>(data_.get());
 }
 
 inline const char* IterVarType2String(IterVarType t) {

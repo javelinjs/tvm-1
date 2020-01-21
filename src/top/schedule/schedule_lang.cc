@@ -63,10 +63,8 @@ void Split(StageNode* self,
         parent->iter_type == kCommReduce ||
         parent->iter_type == kOrdered)
       << "Cannot split on " << IterVarType2String(parent->iter_type);
-  IterVar outer = IterVarNode::make(
-      Range(), parent->var.copy_with_suffix(".outer"), parent->iter_type);
-  IterVar inner = IterVarNode::make(
-      Range(), parent->var.copy_with_suffix(".inner"), parent->iter_type);
+  IterVar outer(Range(), parent->iter_type, parent->name_hint + ".outer", parent->dtype);
+  IterVar inner(Range(), parent->iter_type, parent->name_hint + ".inner", parent->dtype);
   *p_outer = outer;
   *p_inner = inner;
   // The splits
@@ -140,7 +138,7 @@ Stage& Stage::compute_at(Stage parent, IterVar scope) {   // NOLINT(*)
   (*this)->attach_stage = parent;
   bool found = false;
   for (size_t i = 0; i < parent->leaf_iter_vars.size(); ++i) {
-    if (scope == parent->leaf_iter_vars[i]) {
+    if (scope.same_as(parent->leaf_iter_vars[i])) {
       found = true; break;
     }
   }
@@ -246,10 +244,9 @@ Stage& Stage::fuse(IterVar outer, IterVar inner, IterVar* p_target) {  // NOLINT
   IterVarType iter_type = outer->iter_type;
   if (inner->iter_type > iter_type) iter_type = inner->iter_type;
   std::string fused_name =
-      outer->var->name_hint + "." + inner->var->name_hint + ".fused";
+      outer->name_hint + "." + inner->name_hint + ".fused";
 
-  IterVar fused = IterVarNode::make(
-      Range(), Var(fused_name, outer->var.dtype()), iter_type);
+  IterVar fused = IterVar(Range(), iter_type, fused_name, outer->dtype);
 
   ArrayNode* all_vars = self->all_iter_vars.CopyOnWrite();
   ArrayNode* leaf_vars = self->leaf_iter_vars.CopyOnWrite();
@@ -283,9 +280,8 @@ Stage& Stage::fuse(const Array<IterVar>& axes, IterVar* p_target) {  // NOLINT(*
     StageNode* self = operator->();
     // special handle fuse empty array.
     // insert at the outer most loop
-    IterVar singleton = IterVarNode::make(
-        Range::make_by_min_extent(0, 1),
-        Var("singleton", DataType::Int(32)), kDataPar);
+    IterVar singleton(Range::make_by_min_extent(0, 1), kDataPar,
+                      "singleton", DataType::Int(32));
     self->relations.push_back(SingletonNode::make(singleton));
     ArrayNode* all_vars = self->all_iter_vars.CopyOnWrite();
     ArrayNode* leaf_vars = self->leaf_iter_vars.CopyOnWrite();

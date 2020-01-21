@@ -47,7 +47,7 @@ namespace top {
  */
 void PassDownDomain(
     const Stage& stage,
-    std::unordered_map<IterVar, Range>* p_state,
+    std::unordered_map<const IterVarNode*, Range>* p_state,
     arith::Analyzer* analyzer,
     bool allow_missing = false);
 
@@ -62,7 +62,7 @@ void PassDownDomain(
  */
 void PassUpIndex(const Stage& stage,
                  const Map<IterVar, Range>& dom_map,
-                 std::unordered_map<IterVar, PrimExpr>* p_state,
+                 std::unordered_map<const IterVarNode*, PrimExpr>* p_state,
                  bool allow_missing = false);
 
 /*!
@@ -88,7 +88,7 @@ void PassDownIndex(const Stage& stage,
  * \param p_state The index state of each IterVar.
  */
 void PassUpDomain(const Stage& stage,
-                  const std::unordered_map<IterVar, Range>& dom_map,
+                  const std::unordered_map<const IterVarNode*, Range>& dom_map,
                   std::unordered_map<IterVar, IntSet>* p_state);
 
 /*!
@@ -98,7 +98,7 @@ void PassUpDomain(const Stage& stage,
  * \param allow_missing Whether allow missing value.
  */
 void PassUpBitMaskOr(const Stage& stage,
-                     std::unordered_map<IterVar, int>* p_state,
+                     std::unordered_map<const IterVarNode*, int>* p_state,
                      bool allow_missing = false);
 
 /*!
@@ -108,7 +108,7 @@ void PassUpBitMaskOr(const Stage& stage,
  * \param allow_missing Whether allow missing value.
  */
 void PassDownBitMaskOr(const Stage& stage,
-                       std::unordered_map<IterVar, int>* p_state,
+                       std::unordered_map<const IterVarNode*, int>* p_state,
                        bool allow_missing = false);
 
 /*!

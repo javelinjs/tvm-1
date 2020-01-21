@@ -99,9 +99,9 @@ Tensor compute(Array<PrimExpr> shape,
   for (size_t i = 0; i < ndim; ++i) {
     std::ostringstream os;
     os << "ax" << i;
-    axis.emplace_back(IterVarNode::make(
-        Range(0, shape[i]), Var(os.str(), shape[i].dtype()), kDataPar));
-    args.push_back(axis.back()->var);
+    axis.emplace_back(IterVar(
+        Range(0, shape[i]), kDataPar, os.str(), shape[i].dtype()));
+    args.push_back(axis.back());
   }
 
   return ComputeOpNode::make(
@@ -121,9 +121,9 @@ Array<Tensor> compute(Array<PrimExpr> shape,
   for (size_t i = 0; i < ndim; ++i) {
     std::ostringstream os;
     os << "ax" << i;
-    axis.emplace_back(IterVarNode::make(
-        Range(0, shape[i]), Var(os.str(), shape[i].dtype()), kDataPar));
-    args.push_back(axis.back()->var);
+    axis.emplace_back(IterVar(
+        Range(0, shape[i]), kDataPar, os.str(), shape[i].dtype()));
+    args.push_back(axis.back());
   }
 
   Operation op = ComputeOpNode::make(name, tag, attrs, axis, fcompute(args));
@@ -256,28 +256,28 @@ void ComputeOpNode::PropBoundToInputs(
 void BaseComputeOpNode::GatherBound(
     const Operation& self,
     const std::unordered_map<Tensor, TensorDom>& tensor_dom,
-    std::unordered_map<IterVar, Range>* out_dom_map) const {
+    std::unordered_map<const IterVarNode*, Range>* out_dom_map) const {
   CHECK_EQ(self.operator->(), this);
   const TensorDom& tdom = tensor_dom.at(self.output(0));
   for (size_t i = 0; i < this->axis.size(); ++i) {
     Range r = arith::Union(tdom.data.at(i)).cover_range(this->axis[i]->dom);
-    CHECK(!out_dom_map->count(this->axis[i]));
-    (*out_dom_map)[this->axis[i]] = r;
+    CHECK(!out_dom_map->count(this->axis[i].get()));
+    (*out_dom_map)[this->axis[i].get()] = r;
   }
   for (size_t i = 0; i < this->reduce_axis.size(); ++i) {
-    CHECK(!out_dom_map->count(this->reduce_axis[i]));
-    (*out_dom_map)[this->reduce_axis[i]] = this->reduce_axis[i]->dom;
+    CHECK(!out_dom_map->count(this->reduce_axis[i].get()));
+    (*out_dom_map)[this->reduce_axis[i].get()] = this->reduce_axis[i]->dom;
   }
 }
 
 Stmt BaseComputeOpNode::BuildRealize(
     const Stage& stage,
-    const std::unordered_map<IterVar, Range>& realize_map,
+    const std::unordered_map<const IterVarNode*, Range>& realize_map,
     const Stmt& body) const {
   CHECK_EQ(stage->op.get(), this);
   Region bounds;
   for (IterVar iv : this->axis) {
-    bounds.push_back(realize_map.at(iv));
+    bounds.push_back(realize_map.at(iv.get()));
   }
   Stmt realize = body;
   for (int i = this->num_outputs(); i > 0; --i) {
@@ -317,7 +317,7 @@ void MakeReduction(const ComputeOpNode* op,
                    Stmt* provide) {
   Array<PrimExpr>  args;
   for (IterVar iv : op->axis) {
-    args.push_back(iv->var);
+    args.push_back(iv);
   }
   std::vector<Stmt> inits, provides;
 
@@ -351,7 +351,7 @@ Stmt MakeProvide(const ComputeOpNode* op,
                  const Tensor& t) {
   Array<PrimExpr> args;
   for (IterVar iv : op->axis) {
-    args.push_back(iv->var);
+    args.push_back(iv);
   }
   return ProvideNode::make(t->op, t->value_index, op->body[t->value_index], args);
 }
@@ -487,12 +487,12 @@ ComputeLoopNest ComputeLoopNest::make(
   if (self->reduce_axis.size() != 0) {
     // try to find the location to insert the initialization.
     // Fuse the initialization and provide loop when possible.
-    std::unordered_map<IterVar, int> update_state;
+    std::unordered_map<const IterVarNode*, int> update_state;
     for (IterVar iv : self->reduce_axis) {
-      update_state[iv] = 2;
+      update_state[iv.get()] = 2;
     }
     for (size_t i = 0; i < self->num_schedulable_dims(); ++i) {
-      update_state[self->axis[i]] = 1;
+      update_state[self->axis[i].get()] = 1;
     }
     // find which iter var is related to reduction and which is related to axis.
     top::PassDownBitMaskOr(stage, &update_state);
@@ -623,8 +623,8 @@ Stmt TransformUpdate(const Stage& stage,
       auto vit = dom_map.find(iv);
       CHECK(vit != dom_map.end());
       const Range& vrange = vit->second;
-      conds.push_back(likely(iv->var > vrange->min));
-      banned.insert(iv->var.get());
+      conds.push_back(likely(iv > vrange->min));
+      banned.insert(iv.get());
     }
   }
   for (const PrimExpr& pred : n.main_predicates) {

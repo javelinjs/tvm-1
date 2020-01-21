@@ -36,7 +36,7 @@ Stmt MakeCrossThreadReduction(
     bool debug_keep_trivial_loop) {
   Array<PrimExpr>  args;
   for (IterVar iv : self->axis) {
-    args.push_back(iv->var);
+    args.push_back(iv);
   }
   std::unordered_map<IterVar, PrimExpr> value_map;
   auto nest = MakeLoopNest(
@@ -75,7 +75,7 @@ Stmt MakeCrossThreadReduction(
       if (it != stage->iter_var_attrs.end() &&
           (*it).second->bind_thread.defined()) {
         IterVar tv = (*it).second->bind_thread;
-        freduce_args.push_back(tv->var);
+        freduce_args.push_back(tv);
       }
     }
   }
