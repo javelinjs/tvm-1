@@ -43,6 +43,7 @@ from . import hybrid
 from . import testing
 from . import error
 from . import datatype
+from . import pyobj
 
 from . import ndarray as nd
 from .ndarray import context, cpu, gpu, opencl, cl, vulkan, metal, mtl
