@@ -59,6 +59,7 @@ class PyObjectParser(ast.NodeVisitor):
         self.cls_args = []
         self.fields = []
         self.base_cls = []
+        self.namespace = ""
 
     def _get_cxx_type(self, name, annotation):
         # TODO
@@ -77,6 +78,21 @@ class PyObjectParser(ast.NodeVisitor):
         for func in node.body:
             self.visit(func)
 
+    def visit_Name(self, node):
+        return node.id
+
+    def visit_Attribute(self, node):
+        name = self.visit(node.value)
+        assert isinstance(node.attr, str)
+        return name, node.attr
+
+    def visit_Call(self, node):
+        func = node.func
+        func_name = self.visit(func)
+        if func_name == ("self", "__init_handle_by_constructor__"):
+            assert len(node.args) >= 1
+            self.namespace, obj_name = self.visit(node.args[0])
+
     def visit_FunctionDef(self, node):
         if node.name == "__init__":
             for idx, arg in enumerate(node.args.args):
@@ -87,6 +103,8 @@ class PyObjectParser(ast.NodeVisitor):
                     self.cls_args.append((arg_name, arg_type))
                     # also add to fields
                     self.fields.append((arg_name, arg_type))
+            for body in node.body:
+                self.visit(body)
 
     def gen_arg_list(self, with_type=True):
         ret = "("
