@@ -102,6 +102,21 @@ IterVarType ForTypeToIterVarType(tir::ForType for_type);
  */
 tir::ForType IterVarTypeToForType(IterVarType iter_type);
 
+
+/*!
+ * \brief Clone iter vars and return both the new vars and the substitution from old to new.
+ *
+ * \param vars The original iter vars.
+ * \return A pair containing the array of new iter vars and the map from old vars to new ones.
+ */
+std::pair<Array<IterVar>, Map<Var, PrimExpr>> CloneIterVars(const Array<IterVar>& vars);
+
+/*!
+ * \brief Clone reduction by cloning the axis variables.
+ * \param expr A reduction expr to clone. Non-reduction expressions are left intact.
+ */
+PrimExpr CloneReduction(const PrimExpr& expr);
+
 }  // namespace te
 }  // namespace tvm
 #endif  // TVM_TE_OPERATION_OP_UTIL_H_
