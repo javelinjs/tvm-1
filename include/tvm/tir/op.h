@@ -660,6 +660,24 @@ inline bool is_const_int(const PrimExpr& x, int64_t value) {
   return false;
 }
 
+template <typename ValueType>
+inline bool is_const_value(const PrimExpr& e, ValueType value) {
+  static_assert(std::is_integral<ValueType>::value,
+                "Comparison to non-integer values is forbidden.");
+  // This implementation was copy-pasted from HalideIR
+  if (const tir::IntImmNode* i = e.as<tir::IntImmNode>()) {
+    return i->value == value;
+  } else if (const tir::FloatImmNode* i = e.as<tir::FloatImmNode>()) {
+    return i->value == value;
+  } else if (const tir::CastNode* c = e.as<tir::CastNode>()) {
+    return is_const_value(c->value, value);
+  } else if (const tir::BroadcastNode* b = e.as<tir::BroadcastNode>()) {
+    return is_const_value(b->value, value);
+  } else {
+    return false;
+  }
+}
+
 inline bool is_no_op(const tir::Stmt& stmt) {
   if (!stmt.defined()) return true;
   if (const auto* op = stmt.as<tir::EvaluateNode>()) {

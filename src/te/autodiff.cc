@@ -22,6 +22,7 @@
  */
 #include <tvm/runtime/registry.h>
 #include <tvm/te/autodiff.h>
+#include <tvm/te/zero_elimination.h>
 #include <tvm/tir/stmt_functor.h>
 #include <memory>
 #include <topi/transform.h>
@@ -338,7 +339,88 @@ Tensor Jacobian(const Tensor& output, const Tensor& input, bool optimize) {
 
   Tensor tensor = TensorNode::make(new_shape, output->dtype, new_op, value_index);
 
+  if (optimize) {
+    tensor = OptimizeAndLiftNonzeronessConditions(tensor);
+  }
+
   return tensor;
+}
+
+PrimExpr InlineThisCall(const PrimExpr& expr) {
+  if (const CallNode* op = expr.as<CallNode>()) {
+    if (op->call_type == CallNode::CallType::Halide) {
+      if (const ComputeOpNode* op_comp = op->func.as<ComputeOpNode>()) {
+        Array<Var> tensor_axes;
+        for (const auto& var : op_comp->axis) {
+          tensor_axes.push_back(var->var);
+        }
+
+        Stmt inlined = Inline(EvaluateNode::make(expr), op->func, tensor_axes,
+                              op_comp->body[op->value_index]);
+        if (const EvaluateNode* ev = inlined.as<EvaluateNode>()) {
+          // If it is a reduction, clone it
+          return CloneReduction(ev->value);
+        }
+      }
+    }
+  }
+  return expr;
+}
+
+// Implements InlineTensors by trying to inline every Call of the given Expr
+class InlineTensorsMutator : public ExprMutator {
+ public:
+  explicit InlineTensorsMutator(const Array<Tensor>& inlineable, bool inline_reductions = false)
+      : inline_reductions_(inline_reductions) {
+    for (const Tensor& tensor : inlineable) {
+      inlineable_.emplace(tensor->op.operator->(), tensor->value_index);
+    }
+  }
+
+  PrimExpr VisitExpr_(const CallNode* op) {
+    if (op->call_type == CallNode::CallType::Halide) {
+      if (const ComputeOpNode* op_comp = op->func.as<ComputeOpNode>()) {
+        // Inline only if the array of inlineable tensors is empty or contains this tensor
+        if (inlineable_.empty() || inlineable_.count({op_comp, op->value_index})) {
+          // Inline only compute nodes that are not reductions (unless inline reductions is allowed)
+          if (inline_reductions_ || !op_comp->body[0].as<ReduceNode>()) {
+            // Inline this call and then try to perform further inlining
+            return VisitExpr(InlineThisCall(GetRef<PrimExpr>(op)));
+          }
+        }
+      }
+    }
+
+    // If we cannot inline this call, we should try to do inlining in its arguments
+    return ExprMutator::VisitExpr_(op);
+  }
+
+ private:
+  // Tensors which are allowed to be inlined, represented as pairs (op_node, value_index)
+  std::set<std::pair<const OperationNode*, int>> inlineable_;
+  bool inline_reductions_;
+};
+
+Tensor InlineTensors(const Tensor& tensor, const Array<Tensor>& inlineable,
+                     bool inline_reductions) {
+  const ComputeOpNode* op = tensor->op.as<ComputeOpNode>();
+  CHECK(op);
+  PrimExpr body = op->body[tensor->value_index];
+  Array<IterVar> axis = op->axis;
+
+  LOG(INFO) << "body = " << body;
+
+  body = InlineTensorsMutator(inlineable, inline_reductions)(body);
+
+  return TensorFromExpr(body, op->axis, op->name, op->tag, op->attrs, /*clone_axis=*/true);
+}
+
+// If expr is a Call node, perform inlining, otherwise do nothing
+Tensor InlineThisCall(const Tensor& tensor) {
+  const ComputeOpNode* op = tensor->op.as<ComputeOpNode>();
+  CHECK(op);
+  PrimExpr body = InlineThisCall(op->body[tensor->value_index]);
+  return TensorFromExpr(body, op->axis, op->name, op->tag, op->attrs, /*clone_axis=*/true);
 }
 
 Tensor DiffBuildingBlock(const Tensor& output, const Tensor& input, const Tensor& head) {
@@ -347,9 +429,9 @@ Tensor DiffBuildingBlock(const Tensor& output, const Tensor& input, const Tensor
                                   output->op->name + "." + input->op->name + ".grad");
   // TODO(sgrechanik-h): Here we inline only jac_output_input because otherwise there will be
   // performance problems. A better solution would be to inline smartly.
-//  result = InlineTensors(result, {jac_output_input});
-//  result = OptimizeAndLiftNonzeronessConditions(result);
-//  result = InlineTailCall(result);
+  result = InlineTensors(result, {jac_output_input}, /*inline_reductions=*/false);
+  result = OptimizeAndLiftNonzeronessConditions(result);
+  result = InlineThisCall(result);
   return result;
 }
 
@@ -360,6 +442,11 @@ TVM_REGISTER_GLOBAL("tir.Jacobian")
     } else {
       *ret = Jacobian(args[0], args[1]);
     }
+  });
+
+TVM_REGISTER_GLOBAL("tir.DiffBuildingBlock")
+.set_body([](TVMArgs args, TVMRetValue *ret) {
+    *ret = DiffBuildingBlock(args[0], args[1], args[2]);
   });
 
 }  // namespace te
