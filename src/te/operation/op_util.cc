@@ -266,5 +266,36 @@ tir::ForType IterVarTypeToForType(IterVarType iter_type) {
   }
 }
 
+std::pair<Array<IterVar>, Map<Var, PrimExpr>> CloneIterVars(const Array<IterVar>& vars) {
+  Array<IterVar> new_vars;
+  Map<Var, PrimExpr> vmap;
+  for (const IterVar& iv : vars) {
+    IterVar new_v =
+      IterVarNode::make(iv->dom, iv->var.copy_with_suffix(""),
+          iv->iter_type, iv->thread_tag);
+    new_vars.push_back(new_v);
+    vmap.Set(iv->var, new_v->var);
+  }
+  return std::make_pair(std::move(new_vars), std::move(vmap));
+}
+
+PrimExpr CloneReduction(const PrimExpr& expr) {
+  if (const ReduceNode* red = expr.as<ReduceNode>()) {
+    Array<IterVar> new_axis;
+    Map<Var, PrimExpr> vmap;
+    std::tie(new_axis, vmap) = CloneIterVars(red->axis);
+
+    Array<PrimExpr> src_with_newaxis;
+    for (const auto& src : red->source) {
+      src_with_newaxis.push_back(Substitute(src, vmap));
+    }
+
+    return ReduceNode::make(red->combiner, src_with_newaxis,
+        new_axis, Substitute(red->condition, vmap), red->value_index);
+  } else {
+    return expr;
+  }
+}
+
 }  // namespace te
 }  // namespace tvm
