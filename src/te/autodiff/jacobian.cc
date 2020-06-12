@@ -355,7 +355,9 @@ Tensor Jacobian(const Tensor& output, const Tensor& input) {
     new_shape.push_back(e);
   }
 
-  return TensorNode::make(new_shape, output->dtype, new_op, value_index);
+  Tensor ret = TensorNode::make(new_shape, output->dtype, new_op, value_index);
+  ret = OptimizeAndLiftNonzeronessConditions(ret);
+  return ret;
 }
 
 }  // namespace te

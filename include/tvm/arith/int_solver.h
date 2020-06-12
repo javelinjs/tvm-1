@@ -299,6 +299,15 @@ IntConstraints SolveInequalitiesToRange(const IntConstraints& system_to_solve);
  */
 IntConstraintsTransform SolveInequalitiesDeskewRange(const IntConstraints& system_to_solve);
 
+/*!
+ * TODO
+ * \param bounds
+ * \param relations
+ * \return
+ */
+Array<PrimExpr> as_conditions(const Map<Var, IntGrpBounds>& bounds,
+                              const Array<PrimExpr>& relations);
+
 }  // namespace arith
 }  // namespace tvm
 #endif  // TVM_ARITH_INT_SOLVER_H_
