@@ -65,9 +65,10 @@ Tensor VectorJacobianProduct(const Tensor& output, const Tensor& input, const Te
   Tensor jac = Jacobian(output, input);
   Tensor result = topi::tensordot(head, jac, /*axes=*/output->shape.size(),
                                   output->op->name + "." + input->op->name + ".grad");
-  result = InlineTensors(result, {jac});
+  result = InlineTensors(result, {jac}, false);
   result = OptimizeAndLiftNonzeronessConditions(result);
-  result = InlineTailCall(result);
+  // inline tail call
+  result = InlineTensors(result, result->op->InputTensors(), true);
   return result;
 }
 

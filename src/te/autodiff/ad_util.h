@@ -66,6 +66,14 @@ Tensor TensorFromExpr(const PrimExpr& expr, const Array<IterVar>& axis,
                       const Map<String, ObjectRef>& attrs = {},
                       bool clone_axis = true);
 
+Tensor TransformTensorBody(
+    const Tensor& tensor,
+    const std::function<PrimExpr(const PrimExpr&, const Array<IterVar>&)>& func);
+
+Tensor TransformTensorBody(
+    const Tensor& tensor,
+    const std::function<PrimExpr(const PrimExpr&)>& func);
+
 /*!
  * \brief Inline tensors recursively.
  *
@@ -114,12 +122,6 @@ TVM_DLL arith::IntConstraintsTransform SimplifyDomain(const arith::IntConstraint
 TVM_DLL Tensor OptimizeAndLiftNonzeronessConditions(
     const Tensor& tensor,
     const Map<Var, Range>& vranges = Map<Var, Range>());
-
-/*!
- * \brief If the body of the tensor consists of a single tensor call (indexing) expression,
- *  inline it.
- */
-TVM_DLL Tensor InlineTailCall(const Tensor& tensor);
 
 }  // namespace te
 }  // namespace tvm
