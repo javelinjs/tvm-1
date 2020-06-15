@@ -240,6 +240,15 @@ class IntConstraintsTransform : public ObjectRef {
   TVM_DLL IntConstraintsTransform(IntConstraints src, IntConstraints dst,
                                   Map<Var, PrimExpr> src_to_dst, Map<Var, PrimExpr> dst_to_src);
 
+  /*!
+   * \brief Chain-compose two IntConstraintsTransform together.
+   *        this->dst must be the same as other->src.
+   * @param other another IntConstraintsTransform whose src is same as this->dst.
+   * @return composed IntConstraintsTransform(this->src, other->dst)
+   *         with its variables and ranges are properly modified.
+   */
+  IntConstraintsTransform operator+(const IntConstraintsTransform& other) const;
+
   TVM_DEFINE_OBJECT_REF_METHODS(IntConstraintsTransform, ObjectRef, IntConstraintsTransformNode);
 };
 

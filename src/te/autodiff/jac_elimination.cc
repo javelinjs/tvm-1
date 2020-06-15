@@ -106,16 +106,12 @@ bool CanFactorZeroFromCombiner(const CommReducer& combiner, int value_index,
   return is_const_value(in, 0);
 }
 
-PrimExpr SelectElseZero(const PrimExpr& cond, const PrimExpr& on_true) {
-  return SelectNode::make(cond, on_true, make_zero(on_true.dtype()));
-}
-
 struct NonzeronessConditionResult {
   PrimExpr cond;
   PrimExpr value;
 
   PrimExpr to_expr() const {
-    return SelectElseZero(cond, value);
+    return SelectNode::make(cond, value, make_zero(value.dtype()));
   }
 
   friend std::ostream& operator<<(std::ostream& os, const NonzeronessConditionResult& r) {
@@ -124,6 +120,7 @@ struct NonzeronessConditionResult {
 };
 
 // The implementation of NonzeronessCondition
+// transform expression to cond ? value : 0
 class NonzeronessConditionFunctor
     : public ExprFunctor<NonzeronessConditionResult(const PrimExpr&)> {
  public:
@@ -227,7 +224,6 @@ class NonzeronessConditionFunctor
 
     // For addition and similar ops the result may be nonzero if either of the arguments is
     // nonzero, so we combine the conditions with Or.
-
     if (tir::ExprDeepEqual()(nz_a.cond, nz_b.cond)) {
       // If the conditions are the same, we don't need Or
       if (nz_a.value.same_as(op->a) && nz_b.value.same_as(op->b)) {
@@ -255,7 +251,6 @@ class NonzeronessConditionFunctor
 
     // For multiplication and similar ops the result may be nonzero if
     // both the arguments are nonzero, so we combine with And.
-
     PrimExpr new_cond = analyzer_.Simplify(nz_a.cond && nz_b.cond, 3);
 
     if (nz_a.value.same_as(op->a) && nz_b.value.same_as(op->b)) {
@@ -430,13 +425,7 @@ FactorOutAtomicFormulasResult FactorOutAtomicFormulas(const PrimExpr& e) {
   return FactorOutAtomicFormulasFunctor().VisitExpr(e);
 }
 
-arith::IntConstraintsTransform IdDomainTransformation(const arith::IntConstraints& domain) {
-  Map<Var, PrimExpr> identity_map;
-  for (const Var& v : domain->variables) {
-    identity_map.Set(v, v);
-  }
-  return arith::IntConstraintsTransform(domain, domain, identity_map, identity_map);
-}
+
 
 // Combine all expressions from the container using &&.
 template <class container>
@@ -753,34 +742,21 @@ arith::IntConstraintsTransform EliminateDivModFromDomainConditions(const arith::
   return arith::IntConstraintsTransform(domain, new_domain, src_to_dst, dst_to_src);
 }
 
-arith::IntConstraintsTransform ComposeDomainTransformations(
-    const arith::IntConstraintsTransform& first, const arith::IntConstraintsTransform& second) {
-  CHECK(second->src.same_as(first->dst));
-  Map<Var, PrimExpr> dst_to_src;
-  Map<Var, PrimExpr> src_to_dst;
-
-  arith::Analyzer ana_first;
-  ana_first.Bind(first->src->ranges);
-  for (auto p : second->dst_to_src) {
-    dst_to_src.Set(p.first, ana_first.Simplify(Substitute(p.second, first->dst_to_src), 3));
+// Simplify an iteration domain.
+inline arith::IntConstraintsTransform IdentityTransformation(const arith::IntConstraints& domain) {
+  Map<Var, PrimExpr> identity_map;
+  for (const Var& v : domain->variables) {
+    identity_map.Set(v, v);
   }
-
-  arith::Analyzer ana_second;
-  ana_second.Bind(second->dst->ranges);
-  for (auto p : first->src_to_dst) {
-    src_to_dst.Set(p.first, ana_second.Simplify(Substitute(p.second, second->src_to_dst), 3));
-  }
-  return arith::IntConstraintsTransform(first->src, second->dst,
-                                        src_to_dst, dst_to_src);
+  return arith::IntConstraintsTransform(domain, domain, identity_map, identity_map);
 }
 
-// Simplify an iteration domain.
 arith::IntConstraintsTransform SimplifyDomain(const arith::IntConstraints& domain,
                                               bool eliminate_div_mod) {
-  arith::IntConstraintsTransform transf = IdDomainTransformation(domain);
+  arith::IntConstraintsTransform transf = IdentityTransformation(domain);
 
   if (eliminate_div_mod) {
-    transf = ComposeDomainTransformations(transf, EliminateDivModFromDomainConditions(transf->dst));
+    transf = transf + EliminateDivModFromDomainConditions(transf->dst);
   }
 
   // TODO(sgrechanik-h): Repeating the following steps has a positive effect, however we probably
@@ -788,13 +764,12 @@ arith::IntConstraintsTransform SimplifyDomain(const arith::IntConstraints& domai
   // Also 2 steps seems to be slightly better than 3
   for (size_t i = 0; i < 2; ++i) {
     arith::IntConstraintsTransform tr = arith::SolveLinearEquations(transf->dst);
-    transf = ComposeDomainTransformations(transf, tr);
+    transf = transf + tr;
     // TODO(sgrechanik-h): This helps for some artificial examples, however I'm not sure about
     // enabling it in general. The problem it solves is propagating equalities of outer vars.
-    // tr = AddOuterVariablesIntoDomain(transf->new_domain);
-    // transf += tr;
+    // tr = AddOuterVariablesIntoDomain(transf->dst);
     tr = arith::SolveInequalitiesDeskewRange(transf->dst);
-    transf = ComposeDomainTransformations(transf, tr);
+    transf = transf + tr;
   }
 
   return transf;
@@ -1026,7 +1001,10 @@ PrimExpr RemoveRedundantInequalities(const PrimExpr& expr, const Array<PrimExpr>
 PrimExpr ExtractAsTensorMaybe(const PrimExpr& expr, const PrimExpr& cond,
                               const Array<Var>& outer_axis,
                               const Map<Var, Range>& vranges) {
-  arith::IntConstraints domain_to_solve(outer_axis, vranges, FactorOutAtomicFormulas(cond).to_array());
+  // solve cond, e.g., (jac_i0 == i) && (jac_i1 == j)
+  arith::IntConstraints domain_to_solve(outer_axis, vranges,
+                                        FactorOutAtomicFormulas(cond).to_array());
+  LOG(INFO) << "domain to solve " << domain_to_solve;
   auto res = SimplifyDomain(domain_to_solve);
 
   arith::Analyzer analyzer;
@@ -1294,7 +1272,8 @@ PrimExpr OptimizeAndLiftNonzeronessConditionsImpl(const PrimExpr& expr_orig,
         std::tie(outer_nz_cond, nz_cond) =
             LiftConditionsThroughReduction(nz_cond, red->axis, axis);
         new_outer_cond = new_outer_cond && outer_nz_cond;
-        new_source.Set(red->value_index, SelectElseZero(nz_cond, nz_source));
+        new_source.Set(red->value_index,
+                       SelectNode::make(nz_cond, nz_source, make_zero(nz_source.dtype())));
       }
 
       PrimExpr new_reduce = ReduceNode::make(red->combiner, new_source, red->axis,
@@ -1302,16 +1281,17 @@ PrimExpr OptimizeAndLiftNonzeronessConditionsImpl(const PrimExpr& expr_orig,
       new_reduce = ExtractAsTensorMaybe(new_reduce, new_outer_cond,
                                         IterVarsToVars(axis),
                                         combined_vranges);
-      result = SelectElseZero(new_outer_cond, new_reduce);
+      result = SelectNode::make(new_outer_cond, new_reduce, make_zero(new_reduce.dtype()));
     } else {
       return SimplifyReductionDomain(expr, combined_vranges);
     }
   } else {
     auto nz = NonzeronessCondition(expr);
+    LOG(INFO) << nz.cond << " ? " << nz.value << " : 0";
     PrimExpr new_expr = ExtractAsTensorMaybe(nz.value, nz.cond,
                                          IterVarsToVars(axis),
                                          combined_vranges);
-    result = SelectElseZero(nz.cond, new_expr);
+    result = SelectNode::make(nz.cond, new_expr, make_zero(new_expr.dtype()));
   }
 
   // Note that RemoveRedundantInequalities can sometimes propagate equalities which

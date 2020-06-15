@@ -226,6 +226,28 @@ IntConstraintsTransform::IntConstraintsTransform(IntConstraints src, IntConstrai
   data_ = std::move(node);
 }
 
+IntConstraintsTransform IntConstraintsTransform::operator+(
+    const IntConstraintsTransform& other) const {
+  CHECK(other->src.same_as(operator->()->dst));
+  Map<Var, PrimExpr> dst_to_src;
+  Map<Var, PrimExpr> src_to_dst;
+
+  Analyzer ana_first;
+  ana_first.Bind(operator->()->src->ranges);
+  for (auto p : other->dst_to_src) {
+    dst_to_src.Set(p.first,
+                   ana_first.Simplify(Substitute(p.second, operator->()->dst_to_src)));
+  }
+
+  Analyzer ana_second;
+  ana_second.Bind(other->dst->ranges);
+  for (auto p : operator->()->src_to_dst) {
+    src_to_dst.Set(p.first, ana_second.Simplify(Substitute(p.second, other->src_to_dst)));
+  }
+  return IntConstraintsTransform(operator->()->src, other->dst,
+                                 src_to_dst, dst_to_src);
+}
+
 TVM_REGISTER_NODE_TYPE(IntConstraintsTransformNode);
 
 TVM_REGISTER_GLOBAL("arith.IntConstraintsTransform")
