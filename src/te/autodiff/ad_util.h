@@ -107,7 +107,7 @@ TVM_DLL Tensor InlineTensors(const Tensor& tensor,
  * \param domain The original domain.
  * \param eliminate_div_mod Whether to eliminate div and mod by introducing new variables.
  */
-TVM_DLL arith::IntConstraintsTransform SimplifyDomain(const arith::IntConstraints& domain,
+TVM_DLL arith::IntConstraintsTransform SimplifyIterDomain(const arith::IntConstraints& domain,
                                                       bool eliminate_div_mod = true);
 
 /*!

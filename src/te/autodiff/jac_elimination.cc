@@ -751,8 +751,8 @@ inline arith::IntConstraintsTransform IdentityTransformation(const arith::IntCon
   return arith::IntConstraintsTransform(domain, domain, identity_map, identity_map);
 }
 
-arith::IntConstraintsTransform SimplifyDomain(const arith::IntConstraints& domain,
-                                              bool eliminate_div_mod) {
+arith::IntConstraintsTransform SimplifyIterDomain(const arith::IntConstraints& domain,
+                                                  bool eliminate_div_mod) {
   arith::IntConstraintsTransform transf = IdentityTransformation(domain);
 
   if (eliminate_div_mod) {
@@ -795,7 +795,7 @@ PrimExpr SimplifyReductionDomain(const PrimExpr& expr, const Map<Var, Range>& ou
     Array<PrimExpr> relations = FactorOutAtomicFormulas(red->condition).to_array();
 
     arith::IntConstraints domain(vars, vranges, relations);
-    auto res = SimplifyDomain(domain);
+    auto res = SimplifyIterDomain(domain);
 
     Array<PrimExpr> new_source;
     for (const PrimExpr& src : red->source) {
@@ -998,25 +998,27 @@ PrimExpr RemoveRedundantInequalities(const PrimExpr& expr, const Array<PrimExpr>
 
 // Extract the given expr under the given condition as a separate tensor if the volume of the
 // extracted tensor will be less than the volume of the outer_axis
-PrimExpr ExtractAsTensorMaybe(const PrimExpr& expr, const PrimExpr& cond,
-                              const Array<Var>& outer_axis,
-                              const Map<Var, Range>& vranges) {
+PrimExpr TrySimplifyCompute(const PrimExpr& expr, const PrimExpr& cond,
+                            const Array<Var>& outer_axis,
+                            const Map<Var, Range>& vranges) {
   // solve cond, e.g., (jac_i0 == i) && (jac_i1 == j)
   arith::IntConstraints domain_to_solve(outer_axis, vranges,
                                         FactorOutAtomicFormulas(cond).to_array());
   LOG(INFO) << "domain to solve " << domain_to_solve;
-  auto res = SimplifyDomain(domain_to_solve);
+  auto res = SimplifyIterDomain(domain_to_solve);
+  LOG(INFO) << "solved domain " << res;
 
   arith::Analyzer analyzer;
   analyzer.Bind(res->dst->ranges);
   PrimExpr new_expr = analyzer.Simplify(Substitute(expr, res->src_to_dst), 3);
-  // This is mostly done to simplify if_then_else which is not known by the Halide simplifier
+  // TODO: This is mostly done to simplify if_then_else which is not known by the Halide simplifier
   new_expr = RemoveRedundantInequalities(new_expr, res->dst->relations);
 
   // Keep only those variables of the new vars which are used in the new_expr
   Array<Var> used_res_variables;
   for (const Var& var : res->dst->variables) {
     if (ExprUseVar(new_expr, var)) {
+      CHECK(res->dst->ranges.count(var)) << "Range of " << var << " cannot be inferred.";
       used_res_variables.push_back(var);
     }
   }
@@ -1028,7 +1030,7 @@ PrimExpr ExtractAsTensorMaybe(const PrimExpr& expr, const PrimExpr& cond,
     return new_expr;
   }
 
-  // If it's already a call to a tensor then extracting it will probably be useless
+  // If it's already a call to a tensor then it will probably be useless to further simplify it.
   if (const CallNode* call = new_expr.as<CallNode>()) {
     if (call->call_type == CallNode::CallType::Halide) {
       return expr;
@@ -1038,6 +1040,7 @@ PrimExpr ExtractAsTensorMaybe(const PrimExpr& expr, const PrimExpr& cond,
   // Compute volumes before and after
   PrimExpr old_volume = make_const(DataType::Int(64), 1);
   for (const Var& var : outer_axis) {
+    CHECK(vranges.count(var)) << "Range of " << var << " was not provided.";
     old_volume = old_volume * vranges[var]->extent;
   }
 
@@ -1278,9 +1281,8 @@ PrimExpr OptimizeAndLiftNonzeronessConditionsImpl(const PrimExpr& expr_orig,
 
       PrimExpr new_reduce = ReduceNode::make(red->combiner, new_source, red->axis,
                                              new_reduce_cond, red->value_index);
-      new_reduce = ExtractAsTensorMaybe(new_reduce, new_outer_cond,
-                                        IterVarsToVars(axis),
-                                        combined_vranges);
+      new_reduce =
+          TrySimplifyCompute(new_reduce, new_outer_cond, IterVarsToVars(axis), combined_vranges);
       result = SelectNode::make(new_outer_cond, new_reduce, make_zero(new_reduce.dtype()));
     } else {
       return SimplifyReductionDomain(expr, combined_vranges);
@@ -1288,9 +1290,8 @@ PrimExpr OptimizeAndLiftNonzeronessConditionsImpl(const PrimExpr& expr_orig,
   } else {
     auto nz = NonzeronessCondition(expr);
     LOG(INFO) << nz.cond << " ? " << nz.value << " : 0";
-    PrimExpr new_expr = ExtractAsTensorMaybe(nz.value, nz.cond,
-                                         IterVarsToVars(axis),
-                                         combined_vranges);
+    PrimExpr new_expr =
+        TrySimplifyCompute(nz.value, nz.cond, IterVarsToVars(axis), combined_vranges);
     result = SelectNode::make(nz.cond, new_expr, make_zero(new_expr.dtype()));
   }
 
@@ -1299,7 +1300,7 @@ PrimExpr OptimizeAndLiftNonzeronessConditionsImpl(const PrimExpr& expr_orig,
   Array<PrimExpr> axis_conds = IterVarsToInequalities(axis);
   result = RemoveRedundantInequalities(result, axis_conds);
 
-  // Sometimes ExtractAsTensorMaybe doesn't perform extraction, so there may be some non-top
+  // Sometimes TrySimplifyCompute doesn't perform extraction, so there may be some non-top
   // reductions left, take care of them
   result = analyzer.Simplify(ExtractNonTopReductions(result, IterVarsToVars(axis), combined_vranges), 3);
   return result;
