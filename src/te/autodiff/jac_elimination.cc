@@ -54,6 +54,15 @@ Map<Var, Range> IterVarsToMap(const Array<IterVar>& itervars) {
   return res;
 }
 
+// Concatenate two arrays
+template <class T>
+Array<T> Concat(Array<T> a, const Array<T>& b) {
+  for (const auto& x : b) {
+    a.push_back(x);
+  }
+  return std::move(a);
+}
+
 template <typename ValueType>
 inline bool is_const_value(const PrimExpr& e, ValueType value) {
   static_assert(std::is_integral<ValueType>::value,
@@ -276,7 +285,7 @@ class NonzeronessConditionFunctor
   arith::Analyzer analyzer_;
 };
 
-NonzeronessConditionResult NonzeronessCondition(const PrimExpr& expr) {
+inline NonzeronessConditionResult NonzeronessCondition(const PrimExpr& expr) {
   return NonzeronessConditionFunctor().NonzeronessCondition(expr);
 }
 
@@ -712,15 +721,6 @@ EliminateDivModResult EliminateDivMod(const PrimExpr& expr, Map<Var, Range> rang
   return res;
 }
 
-// Concatenate two arrays
-template <class T>
-Array<T> Concat(Array<T> a, const Array<T>& b) {
-  for (const auto& x : b) {
-    a.push_back(x);
-  }
-  return std::move(a);
-}
-
 arith::IntConstraintsTransform EliminateDivModFromDomainConditions(const arith::IntConstraints& domain) {
   auto elim_res = EliminateDivMod(All(domain->relations), domain->ranges);
 
@@ -1070,79 +1070,71 @@ PrimExpr TrySimplifyCompute(const PrimExpr& expr, const PrimExpr& cond,
                         CallNode::CallType::Halide, tensor->op, tensor->value_index);
 }
 
-class ExprFreeVarsVisitor : public StmtExprVisitor {
+class FreeVarsVisitor : public StmtExprVisitor {
  public:
   std::vector<Var> free_array;
   std::unordered_set<const VarNode*> bound;
   std::unordered_set<const VarNode*> free;
 
-  virtual void VisitExpr(const PrimExpr& node) {
-    if (const VarNode* v = node.as<VarNode>()) {
-      if (!bound.count(v) && !free.count(v)) {
-        free.insert(v);
-        free_array.push_back(Downcast<Var>(node));
-      }
-    } else {
-      StmtExprVisitor::VisitExpr(node);
+  void VisitExpr_(const VarNode* op) final {
+    if (!bound.count(op) && !free.count(op)) {
+      free.insert(op);
+      free_array.push_back(GetRef<Var>(op));
     }
   }
 
-  void VisitExpr_(const VarNode* op) {
-    CHECK(false) << "This case shouldn't happen";
-  }
-
-  void VisitStmt_(const LetStmtNode* op) {
+  void VisitStmt_(const LetStmtNode* op) final {
     bound.insert(op->var.get());
     StmtExprVisitor::VisitStmt_(op);
   }
 
-  void VisitStmt_(const ForNode* op) {
+  void VisitStmt_(const ForNode* op) final {
     bound.insert(op->loop_var.get());
     StmtExprVisitor::VisitStmt_(op);
   }
 
-  void VisitExpr_(const LetNode* op) {
+  void VisitExpr_(const LetNode* op) final {
     bound.insert(op->var.get());
     StmtExprVisitor::VisitExpr_(op);
   }
 
-  void VisitExpr_(const ReduceNode* op) {
+  void VisitExpr_(const ReduceNode* op) final {
     for (const auto& iv : op->axis) {
       bound.insert(iv->var.get());
     }
     StmtExprVisitor::VisitExpr_(op);
   }
 
-  void VisitStmt_(const StoreNode* op) {
+  void VisitStmt_(const StoreNode* op) final {
     VisitExpr(op->buffer_var);
     StmtExprVisitor::VisitStmt_(op);
   }
 
-  void VisitStmt_(const AllocateNode* op) {
+  void VisitStmt_(const AllocateNode* op) final {
     VisitExpr(op->buffer_var);
     StmtExprVisitor::VisitStmt_(op);
   }
 
-  void VisitStmt_(const FreeNode* op) {
+  void VisitStmt_(const FreeNode* op) final {
     VisitExpr(op->buffer_var);
     StmtExprVisitor::VisitStmt_(op);
   }
 
-  void VisitExpr_(const LoadNode* op) {
+  void VisitExpr_(const LoadNode* op) final {
     VisitExpr(op->buffer_var);
     StmtExprVisitor::VisitExpr_(op);
   }
 };
 
-class ExtractReductionsMutator : public ExprMutator {
+class ReductionAsTensorAccessMutator : public ExprMutator {
  public:
-  explicit ExtractReductionsMutator(const Array<Var>& outer_axis,
-                                    Map<Var, Range> vranges,
-                                    std::string name = "extracted_reduction")
+  explicit ReductionAsTensorAccessMutator(const Array<Var>& outer_axis,
+                                          Map<Var, Range> vranges,
+                                          std::string name = "extracted_reduction")
       : outer_axis_(outer_axis), vranges_(std::move(vranges)), name_(std::move(name)) {}
 
-  PrimExpr VisitExpr_(const ReduceNode* op) {
-    ExtractReductionsMutator new_mutator(Concat(IterVarsToVars(op->axis), outer_axis_),
+  PrimExpr VisitExpr_(const ReduceNode* op) final {
+    ReductionAsTensorAccessMutator new_mutator(Concat(IterVarsToVars(op->axis), outer_axis_),
                                          Merge(vranges_, IterVarsToMap(op->axis)),
                                          name_);
 
@@ -1154,7 +1146,7 @@ class ExtractReductionsMutator : public ExprMutator {
     PrimExpr new_reduce =
         ReduceNode::make(op->combiner, new_source, op->axis, op->condition, op->value_index);
 
-    ExprFreeVarsVisitor fv_visitor;
+    FreeVarsVisitor fv_visitor;
     fv_visitor(new_reduce);
 
     // Vars of the tensor we are going to create for this reduction
@@ -1166,11 +1158,11 @@ class ExtractReductionsMutator : public ExprMutator {
       }
     }
 
-    auto newaxis_vmap_pair = CloneIterVars(IterVarsFromMap(vars, vranges_));
-    Array<IterVar> new_axis = newaxis_vmap_pair.first;
+    auto new_axis_vmap_pair = CloneIterVars(IterVarsFromMap(vars, vranges_));
+    Array<IterVar> new_axis = new_axis_vmap_pair.first;
     arith::Analyzer analyzer;
     analyzer.Bind(IterVarsToMap(new_axis));
-    new_reduce = analyzer.Simplify(Substitute(new_reduce, newaxis_vmap_pair.second), 3);
+    new_reduce = analyzer.Simplify(Substitute(new_reduce, new_axis_vmap_pair.second), 3);
 
     Tensor tensor = TensorFromExpr(new_reduce, new_axis, name_, tag_, attrs_);
 
@@ -1192,28 +1184,28 @@ class ExtractReductionsMutator : public ExprMutator {
 };
 
 // Extract reductions as separate tensors.
-PrimExpr ExtractReductions(const PrimExpr& expr,
-                           const Array<Var>& outer_axis,
-                           const Map<Var, Range>& vranges) {
-  return ExtractReductionsMutator(outer_axis, vranges)(expr);
+inline PrimExpr ReductionAsTensorAccess(const PrimExpr& expr,
+                                        const Array<Var>& outer_axis,
+                                        const Map<Var, Range>& vranges) {
+  return ReductionAsTensorAccessMutator(outer_axis, vranges)(expr);
 }
 
-PrimExpr ExtractNonTopReductions(const PrimExpr& expr,
-                                 const Array<Var>& outer_axis,
-                                 const Map<Var, Range>& vranges) {
+PrimExpr LiftReductions(const PrimExpr& expr,
+                        const Array<Var>& outer_axis,
+                        const Map<Var, Range>& vranges) {
   if (const ReduceNode* red = expr.as<ReduceNode>()) {
     Array<Var> new_outer_axis = Concat(IterVarsToVars(red->axis), outer_axis);
     Map<Var, Range> new_vranges = Merge(vranges, IterVarsToMap(red->axis));
     Array<PrimExpr> new_source;
     for (const PrimExpr& src : red->source) {
-      new_source.push_back(ExtractReductions(src, new_outer_axis, new_vranges));
+      new_source.push_back(ReductionAsTensorAccess(src, new_outer_axis, new_vranges));
     }
-    PrimExpr new_condition = ExtractReductions(red->condition, new_outer_axis, new_vranges);
+    PrimExpr new_condition = ReductionAsTensorAccess(red->condition, new_outer_axis, new_vranges);
 
     return ReduceNode::make(red->combiner, new_source, red->axis,
                             new_condition, red->value_index);
   } else {
-    return ExtractReductions(expr, outer_axis, vranges);
+    return ReductionAsTensorAccess(expr, outer_axis, vranges);
   }
 }
 
@@ -1300,9 +1292,11 @@ PrimExpr OptimizeAndLiftNonzeronessConditionsImpl(const PrimExpr& expr_orig,
   Array<PrimExpr> axis_conds = IterVarsToInequalities(axis);
   result = RemoveRedundantInequalities(result, axis_conds);
 
-  // Sometimes TrySimplifyCompute doesn't perform extraction, so there may be some non-top
-  // reductions left, take care of them
-  result = analyzer.Simplify(ExtractNonTopReductions(result, IterVarsToVars(axis), combined_vranges), 3);
+  // Currently in TVM reductions are only allowed at the top level of compute,
+  // we need to extract intermediate inlined reduction as a separate stage (tensor).
+  // Sometimes TrySimplifyCompute doesn't perform lift / extraction,
+  // so there may be some non-top reductions left, take care of them.
+  result = analyzer.Simplify(LiftReductions(result, IterVarsToVars(axis), combined_vranges), 3);
   return result;
 }
 
