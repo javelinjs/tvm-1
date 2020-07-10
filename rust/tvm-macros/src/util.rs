@@ -17,24 +17,14 @@
  * under the License.
  */
 
-#include <dmlc/logging.h>
-#include <gtest/gtest.h>
-#include <tvm/te/operation.h>
-#include <tvm/tir/analysis.h>
+use proc_macro2::TokenStream;
+use quote::quote;
+use std::env;
 
-TEST(SimplePasses, HasSideEffect) {
-  using namespace tvm;
-  auto n = te::var("n");
-  Array<PrimExpr> shape;
-  shape.push_back(n);
-
-  auto A = te::placeholder(shape, DataType::Float(32), "A");
-
-  CHECK(!tvm::tir::HasSideEffect(A[0]));
-}
-
-int main(int argc, char** argv) {
-  testing::InitGoogleTest(&argc, argv);
-  testing::FLAGS_gtest_death_test_style = "threadsafe";
-  return RUN_ALL_TESTS();
+pub fn get_tvm_rt_crate() -> TokenStream {
+    if env::var("CARGO_PKG_NAME").unwrap() == "tvm-rt" {
+        quote!(crate)
+    } else {
+        quote!(tvm_rt)
+    }
 }

@@ -34,16 +34,25 @@ def cuda_atomic_add_rule(op):
         return tvm.tir.call_pure_extern("int32", "atomicAdd", op.args[0], op.args[1])
     raise RuntimeError("only support int32, float32 and float64")
 
+def opencl_atomic_add_rule(op):
+    if op.dtype == "int32":
+        return tvm.tir.call_pure_extern("int32", "atomic_add", op.args[0], op.args[1])
+    raise RuntimeError("only support int32")
 
 tvm.target.intrin.register_intrin_rule(
     "cuda", "atomic_add", cuda_atomic_add_rule, override=True)
 
+tvm.target.intrin.register_intrin_rule(
+    "opencl", "atomic_add", opencl_atomic_add_rule, override=True)
+
+tvm.ir.register_op_attr("tir.atomic_add", "TCallEffectKind", tvm.tir.CallEffectKind.Opaque)
 
 def atomic_add(x, y):
-    return tvm.tir.call_pure_intrin(y.dtype, "atomic_add", x, y)
+    return tvm.tir.call_intrin(y.dtype, "tir.atomic_add", x, y)
 
 
-def get_valid_counts_ir(data, valid_count, out, score_threshold, id_index, score_index):
+def get_valid_counts_ir(data, valid_count, out, out_indices,
+                        score_threshold, id_index, score_index):
     """Low level IR to get valid count of bounding boxes
     given a score threshold. Also prepares to move valid boxes to the
     top of input data.
@@ -83,6 +92,7 @@ def get_valid_counts_ir(data, valid_count, out, score_threshold, id_index, score
 
     valid_count = ib.buffer_ptr(valid_count)
     out = ib.buffer_ptr(out)
+    out_indices = ib.buffer_ptr(out_indices)
     atomic_add_return = ib.allocate(
         valid_count.dtype, (1,), name='atomic_add_return', scope='local')
     one_count = tvm.tir.const(1, dtype=valid_count.dtype)
@@ -111,13 +121,15 @@ def get_valid_counts_ir(data, valid_count, out, score_threshold, id_index, score
         with ib.if_scope(
                 tvm.tir.all(data[tid * elem_length + score_index] > score_threshold,
                             tvm.tir.any(id_index < 0, data[tid * elem_length + id_index] >= 0))):
-            atomic_add_return[0] = atomic_add(tvm.tir.call_pure_intrin("handle", "tvm_address_of",
+            atomic_add_return[0] = atomic_add(tvm.tir.call_intrin("handle", "tir.address_of",
                                                                        valid_count[i]), one_count)
             with ib.for_range(0, elem_length) as k:
                 out[tid * elem_length + k] = data[tid * elem_length + k]
+                out_indices[tid + k] = tid + k
         with ib.else_scope():
             with ib.for_range(0, elem_length) as k:
                 out[tid * elem_length + k] = -one
+                out_indices[tid + k] = -one_count
 
     return ib.get()
 
@@ -149,24 +161,27 @@ def get_valid_counts(data, score_threshold=0, id_index=0, score_index=1):
         Rearranged data tensor.
     """
     batch_size = data.shape[0]
+    num_anchors = data.shape[1]
     data_buf = tvm.tir.decl_buffer(
         data.shape, data.dtype, "data_buf", data_alignment=8)
     valid_count_buf = tvm.tir.decl_buffer(
         (batch_size,), "int32", "valid_count_buf", data_alignment=8)
     out_buf = tvm.tir.decl_buffer(
         data.shape, data.dtype, "out_buf", data_alignment=8)
+    out_indices_buf = tvm.tir.decl_buffer(
+        (batch_size, num_anchors), "int32", "out_buf", data_alignment=8)
 
-    valid_count, out = \
-        te.extern([(batch_size,), data.shape], [data],
+    valid_count, out, out_indices = \
+        te.extern([(batch_size,), data.shape, (batch_size, num_anchors)], [data],
                   lambda ins, outs: get_valid_counts_ir(
-            ins[0], outs[0], outs[1], score_threshold, id_index, score_index),
+            ins[0], outs[0], outs[1], outs[2], score_threshold, id_index, score_index),
             dtype=["int32", data.dtype],
             in_buffers=[data_buf],
-            out_buffers=[valid_count_buf, out_buf],
+            out_buffers=[valid_count_buf, out_buf, out_indices_buf],
             name="get_valid_counts",
             tag="get_valid_counts_gpu")
 
-    return [valid_count, out]
+    return [valid_count, out, out_indices]
 
 
 def nms_ir(data, sorted_index, valid_count, out, box_indices,
@@ -335,7 +350,7 @@ def nms_ir(data, sorted_index, valid_count, out, box_indices,
     return ib.get()
 
 
-def non_max_suppression(data, valid_count, max_output_size=-1,
+def non_max_suppression(data, valid_count, indices, max_output_size=-1,
                         iou_threshold=0.5, force_suppress=False, top_k=-1,
                         coord_start=2, score_index=1, id_index=0,
                         return_indices=True, invalid_to_bottom=False):
@@ -347,9 +362,18 @@ def non_max_suppression(data, valid_count, max_output_size=-1,
         3-D tensor with shape [batch_size, num_anchors, elem_length].
         The last dimension should be in format of
         [class_id, score, box_left, box_top, box_right, box_bottom].
+        It could be the second output out_tensor of get_valid_counts.
 
     valid_count : tvm.te.Tensor
-        1-D tensor for valid number of boxes.
+        1-D tensor for valid number of boxes. It could be the output
+        valid_count of get_valid_counts.
+
+    indices : tvm.te.Tensor
+        2-D tensor with shape [batch_size, num_anchors], represents
+        the index of box in original data. It could be the third
+        output out_indices of get_valid_counts. The values in the
+        second dimension are like the output of arange(num_anchors)
+        if get_valid_counts is not used before non_max_suppression.
 
     max_output_size : optional, int
         Max number of output valid boxes for each instance.
@@ -441,7 +465,7 @@ def non_max_suppression(data, valid_count, max_output_size=-1,
             in_buffers=[data_buf, sort_tensor_buf, valid_count_buf],
             name="nms",
             tag="nms")
-
+    # TODO(yongwww): Update cuda nms to be consistent with cpu version
     if return_indices:
         return box_indices
 

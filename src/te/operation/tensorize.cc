@@ -55,12 +55,12 @@ size_t InferTensorizeRegion(const ComputeOpNode* self, const Stage& stage,
     CHECK(vit != dom_map.end());
     const Range& vrange = vit->second;
     if (is_one(vrange->extent)) {
-      up_state[iv] = IntSet::single_point(vrange->min);
+      up_state[iv] = IntSet::SinglePoint(vrange->min);
     } else if (found_point) {
       CHECK(is_zero(vrange->min));
-      up_state[iv] = IntSet::single_point(iv->var);
+      up_state[iv] = IntSet::SinglePoint(iv->var);
     } else {
-      up_state[iv] = IntSet::range(vrange);
+      up_state[iv] = IntSet::FromRange(vrange);
     }
     auto iit = stage->iter_var_attrs.find(iv);
     if (iit != stage->iter_var_attrs.end()) {
@@ -88,7 +88,7 @@ size_t InferTensorizeRegion(const ComputeOpNode* self, const Stage& stage,
   }
   for (IterVar iv : self->root_iter_vars()) {
     IntSet iset = up_state.at(iv);
-    Range iv_range = iset.cover_range(dom_map.at(iv));
+    Range iv_range = iset.CoverRange(dom_map.at(iv));
     (*out_dom)[iv] = iv_range;
     analyzer.Bind(iv->var, iv_range);
     temp_dmap[iv->var.get()] = iset;
@@ -100,7 +100,7 @@ size_t InferTensorizeRegion(const ComputeOpNode* self, const Stage& stage,
     Array<Range> vec;
     const Tensor& t = kv.first;
     for (size_t i = 0; i < t.ndim(); ++i) {
-      Range r = arith::Union(kv.second.data.at(i)).cover_range(none);
+      Range r = arith::Union(kv.second.data.at(i)).CoverRange(none);
       CHECK(r.defined()) << "cannot deduce region of tensorized scope for input " << t;
       vec.push_back(std::move(r));
     }
@@ -156,22 +156,19 @@ void VerifyTensorizeLoopNest(const ComputeOpNode* self, const Stage& stage,
 // Remap the tensor placeholder, index and inline things.
 class TensorIntrinMatcher final : public StmtExprMutator {
  public:
-  PrimExpr VisitExpr_(const CallNode* op) final {
+  PrimExpr VisitExpr_(const ProducerLoadNode* op) final {
     PrimExpr expr = StmtExprMutator::VisitExpr_(op);
-    op = expr.as<CallNode>();
-    if (op->call_type == CallNode::Halide) {
-      Tensor t = Downcast<Operation>(op->func).output(op->value_index);
-      auto it = in_remap_.find(t);
-      if (it != in_remap_.end()) {
-        const InputEntry& e = it->second;
-        CHECK_EQ(op->args.size(), e.region.size());
-        Array<PrimExpr> args;
-        for (size_t i = e.start; i < e.region.size(); ++i) {
-          args.push_back(op->args[i] - e.region[i]->min);
-        }
-        return CallNode::make(op->dtype, e.tensor->op->name, args, op->call_type, e.tensor->op,
-                              e.tensor->value_index);
+    op = expr.as<ProducerLoadNode>();
+    auto t = Downcast<Tensor>(op->producer);
+    auto it = in_remap_.find(t);
+    if (it != in_remap_.end()) {
+      const InputEntry& e = it->second;
+      CHECK_EQ(op->indices.size(), e.region.size());
+      Array<PrimExpr> indices;
+      for (size_t i = e.start; i < e.region.size(); ++i) {
+        indices.push_back(op->indices[i] - e.region[i]->min);
       }
+      return ProducerLoad(e.tensor, indices);
     }
     return expr;
   }
@@ -195,7 +192,7 @@ class TensorIntrinMatcher final : public StmtExprMutator {
         axis.push_back(it->second);
       }
     }
-    return ReduceNode::make(op->combiner, op->source, axis, op->condition, op->value_index);
+    return Reduce(op->combiner, op->source, axis, op->condition, op->value_index);
   }
 
   void Init(const ComputeOpNode* self, const Stage& stage,
@@ -350,11 +347,11 @@ Stmt MakeTensorize(const ComputeOpNode* self, const Stage& stage,
   size_t tloc = InferTensorizeRegion(self, stage, dom_map, &out_dom, &in_region);
   TensorIntrin intrin = stage->iter_var_attrs.at(stage->leaf_iter_vars[tloc])->tensor_intrin;
   CHECK(intrin.defined());
-  ComputeLoopNest n = ComputeLoopNest::make(self, stage, dom_map, debug_keep_trivial_loop);
+  ComputeLoopNest n = ComputeLoopNest::Create(self, stage, dom_map, debug_keep_trivial_loop);
   VerifyTensorizeLoopNest(self, stage, n, tloc);
   VerifyTensorizeBody(self, stage, dom_map, out_dom, in_region, intrin);
   // Start bind data.
-  Stmt nop = EvaluateNode::make(0);
+  Stmt nop = Evaluate(0);
   std::vector<Stmt> input_bind_nest, output_bind_nest;
   Array<Tensor> inputs = self->InputTensors();
   CHECK_EQ(inputs.size(), intrin->inputs.size()) << "Tensorize failed: input size mismatch ";
@@ -371,10 +368,9 @@ Stmt MakeTensorize(const ComputeOpNode* self, const Stage& stage,
       tuple.push_back(r->min);
       tuple.push_back(r->extent);
     }
-    input_bind_nest.emplace_back(AttrStmtNode::make(
-        bind_spec, tir::attr::buffer_bind_scope,
-        CallNode::make(DataType::Handle(), tir::intrinsic::tvm_tuple, tuple, CallNode::Intrinsic),
-        nop));
+    input_bind_nest.emplace_back(
+        AttrStmt(bind_spec, tir::attr::buffer_bind_scope,
+                 Call(DataType::Handle(), tir::builtin::tvm_tuple(), tuple), nop));
   }
   // output binding
   const ComputeOpNode* intrin_compute = intrin->op.as<ComputeOpNode>();
@@ -392,10 +388,9 @@ Stmt MakeTensorize(const ComputeOpNode* self, const Stage& stage,
     Tensor tensor = stage->op.output(i - intrin->inputs.size());
     Buffer buffer = intrin->buffers[i];
     Array<ObjectRef> bind_spec{buffer, tensor};
-    output_bind_nest.emplace_back(AttrStmtNode::make(
-        bind_spec, tir::attr::buffer_bind_scope,
-        CallNode::make(DataType::Handle(), tir::intrinsic::tvm_tuple, tuple, CallNode::Intrinsic),
-        nop));
+    output_bind_nest.emplace_back(
+        AttrStmt(bind_spec, tir::attr::buffer_bind_scope,
+                 Call(DataType::Handle(), tir::builtin::tvm_tuple(), tuple), nop));
   }
   // Check variable remap
   std::unordered_map<const VarNode*, PrimExpr> vmap;

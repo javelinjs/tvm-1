@@ -94,32 +94,6 @@ struct ExprLess {
   }
 };
 
-/*!
- * \brief Combine the information into an array of (in)equalities.
- */
-Array<PrimExpr> as_conditions(const Map<Var, IntGrpBounds>& bounds,
-                              const Array<PrimExpr>& relations) {
-  Array<PrimExpr> res;
-  for (const auto iter : bounds) {
-    const Var& v = iter.first;
-    const auto& bnds = iter.second;
-    PrimExpr lhs = bnds->coef * v;
-    for (const PrimExpr& rhs : bnds->equal) {
-      res.push_back(tir::EQNode::make(lhs, rhs));
-    }
-    for (const PrimExpr& rhs : bnds->lower) {
-      res.push_back(tir::GENode::make(lhs, rhs));
-    }
-    for (const PrimExpr& rhs : bnds->upper) {
-      res.push_back(tir::LENode::make(lhs, rhs));
-    }
-  }
-  for (const PrimExpr& e : relations) {
-    res.push_back(e);
-  }
-  return res;
-}
-
 void DebugPrint(
     const std::unordered_set<PrimExpr, StructuralHash, StructuralEqual>& current_ineq_set,
     const std::unordered_set<PrimExpr, StructuralHash, StructuralEqual>& next_ineq_set,
@@ -155,21 +129,21 @@ void DebugPrint(
  */
 class NormalizeComparisons : public ExprMutator {
  public:
-  PrimExpr VisitExpr_(const EQNode* op) override { return Make<EQNode>(op->a, op->b); }
-  PrimExpr VisitExpr_(const NENode* op) override { return Make<NENode>(op->a, op->b); }
-  PrimExpr VisitExpr_(const LTNode* op) override { return Make<LTNode>(op->a, op->b); }
-  PrimExpr VisitExpr_(const LENode* op) override { return Make<LENode>(op->a, op->b); }
-  PrimExpr VisitExpr_(const GTNode* op) override { return Make<LTNode>(op->b, op->a); }
-  PrimExpr VisitExpr_(const GENode* op) override { return Make<LENode>(op->b, op->a); }
+  PrimExpr VisitExpr_(const EQNode* op) override { return Make<EQ>(op->a, op->b); }
+  PrimExpr VisitExpr_(const NENode* op) override { return Make<NE>(op->a, op->b); }
+  PrimExpr VisitExpr_(const LTNode* op) override { return Make<LT>(op->a, op->b); }
+  PrimExpr VisitExpr_(const LENode* op) override { return Make<LE>(op->a, op->b); }
+  PrimExpr VisitExpr_(const GTNode* op) override { return Make<LT>(op->b, op->a); }
+  PrimExpr VisitExpr_(const GENode* op) override { return Make<LE>(op->b, op->a); }
 
  private:
-  template <class TNode>
+  template <class T>
   PrimExpr Make(const PrimExpr& a, const PrimExpr& b) {
     // rewrite LT to LE for ints
-    if (std::is_same<TNode, LTNode>::value && (a.dtype().is_int() || a.dtype().is_uint())) {
-      return LENode::make(analyzer_.Simplify(a - b + 1), make_zero(a.dtype()));
+    if (std::is_same<T, LT>::value && (a.dtype().is_int() || a.dtype().is_uint())) {
+      return LE(analyzer_.Simplify(a - b + 1), make_zero(a.dtype()));
     }
-    return TNode::make(analyzer_.Simplify(a - b), make_zero(a.dtype()));
+    return T(analyzer_.Simplify(a - b), make_zero(a.dtype()));
   }
   arith::Analyzer analyzer_;
 };
@@ -181,8 +155,8 @@ void AddInequality(std::unordered_set<PrimExpr, StructuralHash, StructuralEqual>
     // or has already been added
     return;
   }
-  for (auto iter = inequality_set->begin(); iter != inequality_set->end();) {
-    if (const LENode* new_le = new_ineq.as<LENode>()) {
+  if (const LENode* new_le = new_ineq.as<LENode>()) {
+    for (auto iter = inequality_set->begin(); iter != inequality_set->end();) {
       const LENode* le = iter->as<LENode>();
       if (le && analyzer->CanProve(new_le->a - le->a <= 0)) {
         return;
@@ -191,8 +165,6 @@ void AddInequality(std::unordered_set<PrimExpr, StructuralHash, StructuralEqual>
       } else {
         ++iter;
       }
-    } else {
-      ++iter;
     }
   }
 
@@ -210,7 +182,7 @@ void ClassifyByPolarity(
   for (const PrimExpr& ineq : current_ineq_set) {
     if (const LENode* le = ineq.as<LENode>()) {
       Array<PrimExpr> coef = arith::DetectLinearEquation(le->a, {var});
-      if (!coef.empty() && is_const(coef[0])) {
+      if (!coef.empty() && is_const_int(coef[0])) {
         int64_t coef0 = *as_const_int(coef[0]);
         if (coef0 == 0) {
           // zero polarity, straight to next_ineq_set
@@ -224,7 +196,7 @@ void ClassifyByPolarity(
       }
     } else if (const EQNode* eq = ineq.as<EQNode>()) {
       Array<PrimExpr> coef = arith::DetectLinearEquation(eq->a, {var});
-      if (!coef.empty() && is_const(coef[0])) {
+      if (!coef.empty() && is_const_int(coef[0])) {
         int64_t coef0 = *as_const_int(coef[0]);
         if (coef0 == 0) {
           // zero polarity, straight to next_ineq_set
@@ -293,7 +265,7 @@ PartialSolvedInequalities SolveLinearInequalities(const IntConstraints& system_t
                   &analyzer);
   }
 
-  Map<Var, IntGrpBounds> res_bounds;
+  Map<Var, IntGroupBounds> res_bounds;
   for (const Var& v : system_to_solve->variables) {
     CHECK(!res_bounds.count(v))
         << "Variable " << v
@@ -324,7 +296,7 @@ PartialSolvedInequalities SolveLinearInequalities(const IntConstraints& system_t
         PrimExpr c_neg = make_const(v.dtype(), pos.first / first_gcd);
         // eliminate the current variable
         PrimExpr new_lhs = c_neg * neg.second - c_pos * pos.second;
-        PrimExpr new_ineq = LENode::make(new_lhs, make_zero(pos.second.dtype()));
+        PrimExpr new_ineq = LE(new_lhs, make_zero(pos.second.dtype()));
         // we need rewrite_simplify -> canonical_simplify -> rewrite_simplify
         // to help simplify things like (((y + 10) - (-1*(y - 20))) <= 0) => y - 5 <= 0
         // with steps = 2 it's (y*2) - 10 <= 0
@@ -345,7 +317,7 @@ PartialSolvedInequalities SolveLinearInequalities(const IntConstraints& system_t
       coef_lcm = LeastCommonMultiple(coef_lcm, -neg.first);
     }
 
-    // The resulting lower and upper bounds stored in sorted vectors
+    // The resulting lower and upper bounds
     std::unordered_set<PrimExpr, StructuralHash, StructuralEqual> upper_bounds;
     std::unordered_set<PrimExpr, StructuralHash, StructuralEqual> lower_bounds;
     upper_bounds.reserve(coef_pos.size());
@@ -401,10 +373,10 @@ PartialSolvedInequalities SolveLinearInequalities(const IntConstraints& system_t
     std::sort(equal_list.begin(), equal_list.end(), ExprLess());
 
     // Write it to the result.
-    IntGrpBounds bnds(make_const(v.dtype(), coef_lcm),
-                      Array<PrimExpr>(lower_bounds.begin(), lower_bounds.end()),
-                      Array<PrimExpr>(equal_list.begin(), equal_list.end()),
-                      Array<PrimExpr>(upper_bounds.begin(), upper_bounds.end()));
+    IntGroupBounds bnds(make_const(v.dtype(), coef_lcm),
+                        Array<PrimExpr>(lower_bounds.begin(), lower_bounds.end()),
+                        Array<PrimExpr>(equal_list.begin(), equal_list.end()),
+                        Array<PrimExpr>(upper_bounds.begin(), upper_bounds.end()));
     res_bounds.Set(v, bnds);
 
     std::swap(current_ineq_set_to_solve, next_ineq_set_to_solve);
@@ -440,10 +412,9 @@ IntConstraints SolveInequalitiesToRange(const IntConstraints& inequalities) {
   // we get a set of equality, lower, upper bound of each variable.
   auto solved_system = SolveLinearInequalities(inequalities);
 
-  Map<Var, IntGrpBounds> solved_bounds = solved_system.first;
+  Map<Var, IntGroupBounds> solved_bounds = solved_system.first;
   Array<PrimExpr> solved_other_relations = solved_system.second;
 
-  Array<Var> res_variables;
   Array<PrimExpr> res_relations;
 
   // this keeps being updated during determining the range of each variable.
@@ -476,16 +447,22 @@ IntConstraints SolveInequalitiesToRange(const IntConstraints& inequalities) {
       auto best_range = bnd.FindBestRange(vranges);
 
       if (best_range.defined()) {
+        if (analyzer.CanProveGreaterEqual(-best_range->extent, 0)) {
+          // range.extent <= 0 implies the input inequality system is unsolvable
+          return IntConstraints(/*variables=*/{}, /*ranges=*/{},
+                                /*relations=*/{tir::make_zero(DataType::Bool())});
+        }
         res_ranges.Set(var, best_range);
         vranges.Set(var, best_range);
       }
     }
   }
 
-  // Add the original conditions (with variables substituted) to the resulting conditions
+  // Add the original conditions to the resulting conditions
   arith::Analyzer analyzer;
   analyzer.Bind(vranges);
-  for (const PrimExpr& old_cond : as_conditions(solved_bounds, solved_other_relations)) {
+  for (const PrimExpr& old_cond :
+       AsConditions(inequalities->variables, solved_bounds, solved_other_relations)) {
     if (!analyzer.CanProve(old_cond)) {
       // those not represented in vranges (res_ranges)
       res_relations.push_back(old_cond);
@@ -503,7 +480,7 @@ IntConstraintsTransform SolveInequalitiesDeskewRange(const IntConstraints& inequ
   Map<Var, Range> res_ranges;
   // we get a set of equality, lower, upper bound of each variable.
   auto solved_system = SolveLinearInequalities(inequalities);
-  Map<Var, IntGrpBounds> solved_bounds = solved_system.first;
+  Map<Var, IntGroupBounds> solved_bounds = solved_system.first;
   Array<PrimExpr> solved_other_relations = solved_system.second;
 
   arith::Analyzer analyzer;
@@ -549,6 +526,14 @@ IntConstraintsTransform SolveInequalitiesDeskewRange(const IntConstraints& inequ
       } else if (is_const_int(best_range->extent, 1)) {
         // Don't create an itervar, just replace it everywhere with its min
         res_src_to_dst.Set(var, best_range->min);
+      } else if (analyzer.CanProveGreaterEqual(-best_range->extent, 0)) {
+        // range.extent <= 0 implies the input inequality system is unsolvable
+        return IntConstraintsTransform(inequalities,
+                                       IntConstraints(
+                                           /*variables=*/{},
+                                           /*ranges=*/{},
+                                           /*relations=*/{tir::make_zero(DataType::Bool())}),
+                                       {}, {});
       } else {
         // created new_var starts from 0
         res_src_to_dst.Set(var, new_var + best_range->min);
@@ -569,7 +554,8 @@ IntConstraintsTransform SolveInequalitiesDeskewRange(const IntConstraints& inequ
   }
 
   // Add the original conditions (with variables substituted) to the resulting conditions
-  for (const PrimExpr& old_cond : as_conditions(solved_bounds, solved_other_relations)) {
+  for (const PrimExpr& old_cond :
+       AsConditions(inequalities->variables, solved_bounds, solved_other_relations)) {
     PrimExpr new_cond = analyzer.Simplify(Substitute(old_cond, res_src_to_dst));
     if (!is_const_int(new_cond, 1)) {
       // those not represented in vranges (res_ranges)
@@ -588,17 +574,19 @@ IntConstraintsTransform SolveInequalitiesDeskewRange(const IntConstraints& inequ
 
 TVM_REGISTER_GLOBAL("arith.SolveInequalitiesAsCondition")
     .set_body([](TVMArgs args, TVMRetValue* ret) {
+      IntConstraints problem;
       PartialSolvedInequalities ret_ineq;
       if (args.size() == 1) {
-        ret_ineq = SolveLinearInequalities(args[0]);
+        problem = args[0];
+        ret_ineq = SolveLinearInequalities(problem);
       } else if (args.size() == 3) {
-        IntConstraints problem(args[0], args[1], args[2]);
+        problem = IntConstraints(args[0], args[1], args[2]);
         ret_ineq = SolveLinearInequalities(problem);
       } else {
         LOG(FATAL) << "arith.SolveInequalitiesAsCondition expects 1 or 3 arguments, gets "
                    << args.size();
       }
-      *ret = as_conditions(ret_ineq.first, ret_ineq.second);
+      *ret = AsConditions(problem->variables, ret_ineq.first, ret_ineq.second);
     });
 
 TVM_REGISTER_GLOBAL("arith.SolveInequalitiesToRange").set_body([](TVMArgs args, TVMRetValue* ret) {

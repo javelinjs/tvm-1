@@ -38,11 +38,37 @@
 namespace tvm {
 namespace arith {
 
-IntGrpBounds::IntGrpBounds(PrimExpr coef, Array<PrimExpr> lower, Array<PrimExpr> equal,
-                           Array<PrimExpr> upper) {
+Array<PrimExpr> AsConditions(const Array<Var>& variables, const Map<Var, IntGroupBounds>& bounds,
+                             const Array<PrimExpr>& relations) {
+  Array<PrimExpr> res;
+  // use variables to keep the order of iteration
+  // so as to get rid of any non-determinism.
+  CHECK_EQ(variables.size(), bounds.size());
+  for (const auto v : variables) {
+    CHECK(bounds.count(v));
+    const auto& bnds = bounds[v];
+    PrimExpr lhs = bnds->coef * v;
+    for (const PrimExpr& rhs : bnds->equal) {
+      res.push_back(tir::EQ(lhs, rhs));
+    }
+    for (const PrimExpr& rhs : bnds->lower) {
+      res.push_back(tir::GE(lhs, rhs));
+    }
+    for (const PrimExpr& rhs : bnds->upper) {
+      res.push_back(tir::LE(lhs, rhs));
+    }
+  }
+  for (const PrimExpr& e : relations) {
+    res.push_back(e);
+  }
+  return res;
+}
+
+IntGroupBounds::IntGroupBounds(PrimExpr coef, Array<PrimExpr> lower, Array<PrimExpr> equal,
+                               Array<PrimExpr> upper) {
   CHECK(coef.dtype().is_int() || coef.dtype().is_uint())
-      << "Coefficient in IntGrpBounds must be integers";
-  ObjectPtr<IntGrpBoundsNode> node = make_object<IntGrpBoundsNode>();
+      << "Coefficient in IntGroupBounds must be integers";
+  ObjectPtr<IntGroupBoundsNode> node = make_object<IntGroupBoundsNode>();
   node->coef = std::move(coef);
   node->lower = std::move(lower);
   node->equal = std::move(equal);
@@ -50,7 +76,7 @@ IntGrpBounds::IntGrpBounds(PrimExpr coef, Array<PrimExpr> lower, Array<PrimExpr>
   data_ = std::move(node);
 }
 
-IntGrpBounds IntGrpBounds::range(const Range& r) {
+IntGroupBounds IntGroupBounds::FromRange(const Range& r) {
   Analyzer analyzer;
   PrimExpr coef = tir::make_const(r->min.dtype(), 1);
   Array<PrimExpr> equal;
@@ -62,45 +88,49 @@ IntGrpBounds IntGrpBounds::range(const Range& r) {
     lower.push_back(r->min);
     upper.push_back(analyzer.Simplify(r->min + r->extent - 1));
   }
-  return IntGrpBounds(coef, lower, equal, upper);
+  return IntGroupBounds(coef, lower, equal, upper);
 }
 
-IntGrpBounds IntGrpBounds::operator+(const Range& r) {
+IntGroupBounds IntGroupBounds::operator+(const Range& r) {
   Analyzer analyzer;
   Array<PrimExpr> equal;
   Array<PrimExpr> lower;
   Array<PrimExpr> upper;
+  const PrimExpr& coef = operator->()->coef;
   if (tir::is_one(r->extent)) {
-    equal.push_back(analyzer.Simplify(r->min * operator->()->coef));
+    equal.push_back(analyzer.Simplify(r->min * coef));
   } else {
-    lower.push_back(analyzer.Simplify(r->min * operator->()->coef));
-    upper.push_back(analyzer.Simplify((r->min + r->extent - 1) * operator->()->coef));
+    lower.push_back(analyzer.Simplify(r->min * coef));
+    upper.push_back(analyzer.Simplify((r->min + r->extent - 1) * coef));
   }
   for (const auto& eq : operator->()->equal) equal.push_back(eq);
   for (const auto& lb : operator->()->lower) lower.push_back(lb);
   for (const auto& ub : operator->()->upper) upper.push_back(ub);
-  return IntGrpBounds(operator->()->coef, lower, equal, upper);
+  return IntGroupBounds(coef, lower, equal, upper);
 }
 
-IntGrpBounds IntGrpBounds::Substitute(const Map<Var, PrimExpr>& subst) const {
+IntGroupBounds IntGroupBounds::Substitute(const Map<Var, PrimExpr>& subst) const {
   auto apply_fun = [&subst](const PrimExpr& e) { return tir::Substitute(e, subst); };
-  return IntGrpBounds(tir::Substitute(operator->()->coef, subst),
-                      tir::UpdateArray(operator->()->lower, apply_fun),
-                      tir::UpdateArray(operator->()->equal, apply_fun),
-                      tir::UpdateArray(operator->()->upper, apply_fun));
+  return IntGroupBounds(tir::Substitute(operator->()->coef, subst),
+                        tir::UpdateArray(operator->()->lower, apply_fun),
+                        tir::UpdateArray(operator->()->equal, apply_fun),
+                        tir::UpdateArray(operator->()->upper, apply_fun));
 }
 
-Range IntGrpBounds::FindBestRange(const Map<Var, Range>& vranges_addl) const {
+Range IntGroupBounds::FindBestRange(const Map<Var, Range>& vranges_addl) const {
   Analyzer analyzer;
   analyzer.Bind(vranges_addl);
 
   std::unordered_map<const VarNode*, IntSet> var_intsets;
   for (auto kv : vranges_addl) {
-    var_intsets[kv.first.get()] = IntSet::range(kv.second);
+    var_intsets[kv.first.get()] = IntSet::FromRange(kv.second);
   }
 
-  std::vector<PrimExpr> lowers(operator->()->equal.begin(), operator->()->equal.end());
-  std::vector<PrimExpr> uppers(operator->()->equal.begin(), operator->()->equal.end());
+  const Array<PrimExpr>& equal = operator->()->equal;
+  const PrimExpr& coef = operator->()->coef;
+
+  std::vector<PrimExpr> lowers(equal.begin(), equal.end());
+  std::vector<PrimExpr> uppers(equal.begin(), equal.end());
   for (const auto& expr : operator->()->lower) {
     lowers.push_back(expr);
   }
@@ -108,7 +138,7 @@ Range IntGrpBounds::FindBestRange(const Map<Var, Range>& vranges_addl) const {
     uppers.push_back(expr);
   }
 
-  if (lowers.size() == 1 && uppers.size() == 1 && tir::is_one(operator->()->coef)) {
+  if (lowers.size() == 1 && uppers.size() == 1 && tir::is_one(coef)) {
     return Range(analyzer.Simplify(lowers[0]), analyzer.Simplify(uppers[0] + 1));
   }
 
@@ -123,17 +153,16 @@ Range IntGrpBounds::FindBestRange(const Map<Var, Range>& vranges_addl) const {
 
   for (const PrimExpr& low : lowers) {
     for (const PrimExpr& upp : uppers) {
-      PrimExpr diff_1 = analyzer.Simplify(floordiv(upp - low, operator->()->coef), 3);
+      PrimExpr diff_1 = analyzer.Simplify(floordiv(upp - low, coef), 3);
       // Since diff may depend on some other variables, we compute its overapproximation
       PrimExpr diff_over_1 = analyzer.Simplify(EvalSet(diff_1, var_intsets).max(), 3);
 
       // low is the lower bound for v*coef, but we need the lower bound for v.
       // We use rounding-up division to compute it. Since we want to use a single formula
-      PrimExpr low_divided =
-          analyzer.Simplify(floordiv(low + operator->()->coef - 1, operator->()->coef), 3);
+      PrimExpr low_divided = analyzer.Simplify(floordiv(low + coef - 1, coef), 3);
 
       // Compute another difference which may be more precise (or not).
-      PrimExpr diff_2 = analyzer.Simplify(floordiv(upp, operator->()->coef) - low_divided, 3);
+      PrimExpr diff_2 = analyzer.Simplify(floordiv(upp, coef) - low_divided, 3);
       PrimExpr diff_over_2 = analyzer.Simplify(EvalSet(diff_2, var_intsets).max(), 3);
 
       PrimExpr diff_over =
@@ -152,21 +181,23 @@ Range IntGrpBounds::FindBestRange(const Map<Var, Range>& vranges_addl) const {
     CHECK(!best_diff_over.defined());
     return Range();
   }
-  return Range::make_by_min_extent(best_lower, analyzer.Simplify(best_diff_over + 1));
+  return Range::FromMinExtent(best_lower, analyzer.Simplify(best_diff_over + 1));
 }
 
-TVM_REGISTER_NODE_TYPE(IntGrpBoundsNode);
+TVM_REGISTER_NODE_TYPE(IntGroupBoundsNode);
 
-TVM_REGISTER_GLOBAL("arith.IntGrpBounds")
+TVM_REGISTER_GLOBAL("arith.IntGroupBounds")
     .set_body_typed([](PrimExpr coef, Array<PrimExpr> lower, Array<PrimExpr> equal,
-                       Array<PrimExpr> upper) { return IntGrpBounds(coef, lower, equal, upper); });
+                       Array<PrimExpr> upper) {
+      return IntGroupBounds(coef, lower, equal, upper);
+    });
 
-TVM_REGISTER_GLOBAL("arith.int_grouped_bounds_by_range").set_body_typed(IntGrpBounds::range);
+TVM_REGISTER_GLOBAL("arith.IntGroupBounds_from_range").set_body_typed(IntGroupBounds::FromRange);
 
-TVM_REGISTER_GLOBAL("arith.IntGrpBounds_FindBestRange")
+TVM_REGISTER_GLOBAL("arith.IntGroupBounds_FindBestRange")
     .set_body([](TVMArgs args, TVMRetValue* ret) {
       CHECK(args.size() == 1 || args.size() == 2);
-      IntGrpBounds bounds = args[0];
+      IntGroupBounds bounds = args[0];
       if (args.size() == 1) {
         *ret = bounds.FindBestRange();
       } else if (args.size() == 2) {
@@ -175,9 +206,9 @@ TVM_REGISTER_GLOBAL("arith.IntGrpBounds_FindBestRange")
     });
 
 TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
-    .set_dispatch<IntGrpBoundsNode>([](const ObjectRef& node, ReprPrinter* p) {
-      auto* op = static_cast<const IntGrpBoundsNode*>(node.get());
-      p->stream << "IntGrpBounds(coef=" << op->coef << ", lower=" << op->lower
+    .set_dispatch<IntGroupBoundsNode>([](const ObjectRef& node, ReprPrinter* p) {
+      auto* op = static_cast<const IntGroupBoundsNode*>(node.get());
+      p->stream << "IntGroupBounds(coef=" << op->coef << ", lower=" << op->lower
                 << ", equal=" << op->equal << ", upper=" << op->upper << ")";
     });
 

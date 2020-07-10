@@ -37,8 +37,7 @@ std::pair<Array<IterVar>, Map<Var, PrimExpr>> CloneIterVars(const Array<IterVar>
   Array<IterVar> new_vars;
   Map<Var, PrimExpr> vmap;
   for (const IterVar& iv : vars) {
-    IterVar new_v =
-        IterVarNode::make(iv->dom, iv->var.copy_with_suffix(""), iv->iter_type, iv->thread_tag);
+    IterVar new_v = IterVar(iv->dom, iv->var.copy_with_suffix(""), iv->iter_type, iv->thread_tag);
     new_vars.push_back(new_v);
     vmap.Set(iv->var, new_v->var);
   }
@@ -56,8 +55,8 @@ PrimExpr CloneReduction(const PrimExpr& expr) {
       src_with_newaxis.push_back(tir::Substitute(src, vmap));
     }
 
-    return ReduceNode::make(red->combiner, src_with_newaxis, new_axis,
-                            tir::Substitute(red->condition, vmap), red->value_index);
+    return Reduce(red->combiner, src_with_newaxis, new_axis, tir::Substitute(red->condition, vmap),
+                  red->value_index);
   } else {
     return expr;
   }
@@ -83,7 +82,7 @@ Operation ComputeOpFromExprs(const Array<PrimExpr>& exprs, const Array<IterVar>&
   // If this is a reduction then we have to replicate it
   if (const ReduceNode* red = exprs[0].as<ReduceNode>()) {
     for (size_t i = 0; i < red->source.size(); ++i) {
-      PrimExpr ith_red = ReduceNode::make(
+      PrimExpr ith_red = Reduce(
           red->combiner, red->source, red->axis, red->condition, i);
       new_exprs.push_back(ith_red);
     }
@@ -91,7 +90,7 @@ Operation ComputeOpFromExprs(const Array<PrimExpr>& exprs, const Array<IterVar>&
     new_exprs = exprs;
   }
 
-  return ComputeOpNode::make(name, tag, attrs, axis, new_exprs);
+  return ComputeOp(name, tag, attrs, axis, new_exprs);
 }
 
 Tensor TensorFromExpr(const PrimExpr& expr, const Array<IterVar>& axis,
@@ -138,35 +137,32 @@ class InlineTensorsMutator : public ExprMutator {
     }
   }
 
-  PrimExpr VisitExpr_(const CallNode* op) {
-    // access
-    if (op->call_type == CallNode::CallType::Halide) {
-      if (const ComputeOpNode* op_comp = op->func.as<ComputeOpNode>()) {
-        // Inline only if the array of inlineable tensors is empty or contains this tensor
-        if (inlineable_.empty() || inlineable_.count({op_comp, op->value_index})) {
-          // Inline only compute nodes that are not reductions (unless inline reductions is allowed)
-          if (inline_reductions_ || !op_comp->body[0].as<ReduceNode>()) {
-            PrimExpr expr = GetRef<PrimExpr>(op);
-            Array<Var> tensor_axes;
-            for (const auto& var : op_comp->axis) {
-              tensor_axes.push_back(var->var);
-            }
-
-            Stmt inlined = Inline(EvaluateNode::make(expr),
-                                  Downcast<Operation>(op->func),
-                                  tensor_axes,
-                                  op_comp->body[op->value_index]);
-            if (const EvaluateNode* ev = inlined.as<EvaluateNode>()) {
-              // If it is a reduction, clone it
-              expr = CloneReduction(ev->value);
-            }
-            // Inline this call and then try to perform further inlining
-            return VisitExpr(expr);
+  PrimExpr VisitExpr_(const ProducerLoadNode* op) final {
+    auto tensor = Downcast<te::Tensor>(op->producer);
+    if (const ComputeOpNode* op_comp = tensor->op.as<ComputeOpNode>()) {
+      // Inline only if the array of inlineable tensors is empty or contains this tensor
+      if (inlineable_.empty() || inlineable_.count({op_comp, tensor->value_index})) {
+        // Inline only compute nodes that are not reductions (unless inline reductions is allowed)
+        if (inline_reductions_ || !op_comp->body[0].as<ReduceNode>()) {
+          PrimExpr expr = GetRef<PrimExpr>(op);
+          Array<Var> tensor_axes;
+          for (const auto& var : op_comp->axis) {
+            tensor_axes.push_back(var->var);
           }
+
+          Stmt inlined = Inline(Evaluate(expr),
+                                tensor->op,
+                                tensor_axes,
+                                op_comp->body[tensor->value_index]);
+          if (const EvaluateNode* ev = inlined.as<EvaluateNode>()) {
+            // If it is a reduction, clone it
+            expr = CloneReduction(ev->value);
+          }
+          // Inline this call and then try to perform further inlining
+          return VisitExpr(expr);
         }
       }
     }
-
     // If we cannot inline this call, we should try to do inlining in its arguments
     return ExprMutator::VisitExpr_(op);
   }

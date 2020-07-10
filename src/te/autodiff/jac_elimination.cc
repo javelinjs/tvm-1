@@ -120,7 +120,7 @@ struct NonzeronessConditionResult {
   PrimExpr value;
 
   PrimExpr to_expr() const {
-    return SelectNode::make(cond, value, make_zero(value.dtype()));
+    return Select(cond, value, make_zero(value.dtype()));
   }
 
   friend std::ostream& operator<<(std::ostream& os, const NonzeronessConditionResult& r) {
@@ -144,18 +144,22 @@ class NonzeronessConditionFunctor
 
   // Most of the cases are implemented using helpers below
   result_type VisitExpr_(const VarNode* op) final { return Default_(GetRef<PrimExpr>(op)); }
-  result_type VisitExpr_(const IntImmNode* op) final { return Const_(op); }
-  result_type VisitExpr_(const FloatImmNode* op) final { return Const_(op); }
+  result_type VisitExpr_(const IntImmNode* op) final { return Const_(GetRef<IntImm>(op)); }
+  result_type VisitExpr_(const FloatImmNode* op) final { return Const_(GetRef<FloatImm>(op)); }
   result_type VisitExpr_(const StringImmNode* op) final { return Default_(GetRef<PrimExpr>(op)); }
-  result_type VisitExpr_(const AddNode* op) final { return BinOpAddLike_(op); }
-  result_type VisitExpr_(const SubNode* op) final { return BinOpAddLike_(op); }
-  result_type VisitExpr_(const MulNode* op) final { return BinOpMulLike_(op); }
-  result_type VisitExpr_(const DivNode* op) final { return BinOpDivLike_(op); }
-  result_type VisitExpr_(const ModNode* op) final { return BinOpDivLike_(op); }
-  result_type VisitExpr_(const FloorDivNode* op) final { return BinOpDivLike_(op); }
-  result_type VisitExpr_(const FloorModNode* op) final { return BinOpDivLike_(op); }
-  result_type VisitExpr_(const MinNode* op) final { return BinOpAddLike_(op); }
-  result_type VisitExpr_(const MaxNode* op) final { return BinOpAddLike_(op); }
+  result_type VisitExpr_(const AddNode* op) final { return BinOpAddLike_(GetRef<Add>(op)); }
+  result_type VisitExpr_(const SubNode* op) final { return BinOpAddLike_(GetRef<Sub>(op)); }
+  result_type VisitExpr_(const MulNode* op) final { return BinOpMulLike_(GetRef<Mul>(op)); }
+  result_type VisitExpr_(const DivNode* op) final { return BinOpDivLike_(GetRef<Div>(op)); }
+  result_type VisitExpr_(const ModNode* op) final { return BinOpDivLike_(GetRef<Mod>(op)); }
+  result_type VisitExpr_(const FloorDivNode* op) final {
+    return BinOpDivLike_(GetRef<FloorDiv>(op));
+  }
+  result_type VisitExpr_(const FloorModNode* op) final {
+    return BinOpDivLike_(GetRef<FloorMod>(op));
+  }
+  result_type VisitExpr_(const MinNode* op) final { return BinOpAddLike_(GetRef<Min>(op)); }
+  result_type VisitExpr_(const MaxNode* op) final { return BinOpAddLike_(GetRef<Max>(op)); }
 
   result_type VisitExpr_(const CastNode* op) final {
     auto nz_a = NonzeronessCondition(op->value);
@@ -163,7 +167,7 @@ class NonzeronessConditionFunctor
     if (nz_a.value.same_as(op->value)) {
       return {nz_a.cond, GetRef<PrimExpr>(op)};
     } else {
-      return {nz_a.cond, CastNode::make(op->dtype, nz_a.value)};
+      return {nz_a.cond, Cast(op->dtype, nz_a.value)};
     }
   }
 
@@ -189,12 +193,12 @@ class NonzeronessConditionFunctor
     if (nz_a.value.same_as(true_val) && nz_b.value.same_as(false_val)) {
       return {new_cond, GetRef<PrimExpr>(op)};
     } else {
-      return {new_cond, SelectNode::make(cond, nz_a.value, nz_b.value)};
+      return {new_cond, Select(cond, nz_a.value, nz_b.value)};
     }
   }
 
   result_type VisitExpr_(const CallNode* op) final {
-    if (op->name == intrinsic::tvm_if_then_else) {
+    if (op->op.same_as(Op::Get("tir.if_then_else"))) {
       PrimExpr cond = op->args[0], true_val = op->args[1], false_val = op->args[2];
       auto nz_a = NonzeronessCondition(true_val);
       auto nz_b = NonzeronessCondition(false_val);
@@ -212,22 +216,26 @@ class NonzeronessConditionFunctor
     }
   }
 
+  result_type VisitExpr_(const ProducerLoadNode* op) final {
+    return Default_(GetRef<PrimExpr>(op));
+  }
+
   NonzeronessConditionResult Default_(const PrimExpr& e) {
     // This is always correct, so it's the default
     return {const_true(), e};
   }
 
-  template <class TNode>
-  NonzeronessConditionResult Const_(const TNode* op) {
+  template <class T>
+  NonzeronessConditionResult Const_(const T& op) {
     if (op->value == 0) {
-      return {const_false(), GetRef<PrimExpr>(op)};
+      return {const_false(), op};
     } else {
-      return {const_true(), GetRef<PrimExpr>(op)};
+      return {const_true(), op};
     }
   }
 
-  template <class TNode>
-  NonzeronessConditionResult BinOpAddLike_(const TNode* op) {
+  template <class T>
+  NonzeronessConditionResult BinOpAddLike_(const T& op) {
     auto nz_a = NonzeronessCondition(op->a);
     auto nz_b = NonzeronessCondition(op->b);
 
@@ -236,9 +244,9 @@ class NonzeronessConditionFunctor
     if (tir::ExprDeepEqual()(nz_a.cond, nz_b.cond)) {
       // If the conditions are the same, we don't need Or
       if (nz_a.value.same_as(op->a) && nz_b.value.same_as(op->b)) {
-        return {nz_a.cond, GetRef<PrimExpr>(op)};
+        return {nz_a.cond, op};
       } else {
-        return {nz_a.cond, TNode::make(nz_a.value, nz_b.value)};
+        return {nz_a.cond, T(nz_a.value, nz_b.value)};
       }
     } else {
       // Otherwise use Or
@@ -248,13 +256,13 @@ class NonzeronessConditionFunctor
       // we create a select in the `to_expr` call.
       PrimExpr new_a = tir::ExprDeepEqual()(nz_a.cond, new_cond) ? nz_a.value : nz_a.to_expr();
       PrimExpr new_b = tir::ExprDeepEqual()(nz_b.cond, new_cond) ? nz_b.value : nz_b.to_expr();
-      PrimExpr new_expr = TNode::make(new_a, new_b);
+      PrimExpr new_expr = T(new_a, new_b);
       return {new_cond, new_expr};
     }
   }
 
-  template <class TNode>
-  NonzeronessConditionResult BinOpMulLike_(const TNode* op) {
+  template <class T>
+  NonzeronessConditionResult BinOpMulLike_(const T& op) {
     auto nz_a = NonzeronessCondition(op->a);
     auto nz_b = NonzeronessCondition(op->b);
 
@@ -263,22 +271,22 @@ class NonzeronessConditionFunctor
     PrimExpr new_cond = analyzer_.Simplify(nz_a.cond && nz_b.cond, 3);
 
     if (nz_a.value.same_as(op->a) && nz_b.value.same_as(op->b)) {
-      return {new_cond, GetRef<PrimExpr>(op)};
+      return {new_cond, op};
     } else {
-      return {new_cond, TNode::make(nz_a.value, nz_b.value)};
+      return {new_cond, T(nz_a.value, nz_b.value)};
     }
   }
 
-  template <class TNode>
-  NonzeronessConditionResult BinOpDivLike_(const TNode* op) {
+  template <class T>
+  NonzeronessConditionResult BinOpDivLike_(const T& op) {
     auto nz_a = NonzeronessCondition(op->a);
 
     // For Div we simply use the condition of the numerator.
 
     if (nz_a.value.same_as(op->a)) {
-      return {nz_a.cond, GetRef<PrimExpr>(op)};
+      return {nz_a.cond, op};
     } else {
-      return {nz_a.cond, TNode::make(nz_a.value, op->b)};
+      return {nz_a.cond, T(nz_a.value, op->b)};
     }
   }
  private:
@@ -304,7 +312,7 @@ struct FactorOutAtomicFormulasResult {
   PrimExpr to_expr() const {
     PrimExpr res = rest;
     for (const PrimExpr& e : atomic_formulas) {
-      res = AndNode::make(e, res);
+      res = And(e, res);
     }
     return res;
   }
@@ -624,12 +632,12 @@ class EliminateDivModMutator : public ExprMutator {
     // Convert `ranges` to IntSets
     std::unordered_map<const VarNode*, IntSet> var_intsets;
     for (const auto& p : ranges) {
-      var_intsets[p.first.get()] = IntSet::range(p.second);
+      var_intsets[p.first.get()] = IntSet::FromRange(p.second);
     }
 
     // Infer ranges for the expressions we want to replace with variables
-    Range div_range = EvalSet(DivImpl(mut, val_e, mode), var_intsets).cover_range(Range());
-    Range mod_range = EvalSet(ModImpl(mut, val_e, mode), var_intsets).cover_range(Range());
+    Range div_range = EvalSet(DivImpl(mut, val_e, mode), var_intsets).CoverRange(Range());
+    Range mod_range = EvalSet(ModImpl(mut, val_e, mode), var_intsets).CoverRange(Range());
 
     // We don't want to add unbounded variables
     if (!div_range.get() || !mod_range.get()) {
@@ -666,7 +674,7 @@ class EliminateDivModMutator : public ExprMutator {
       // have to add another condition.
       LOG(WARNING) << "EliminateDivMod: cannot fully eliminate div or mod because "
                    << ModImpl(e, val_e, mode) << "  probably may change its sign";
-      conditions.push_back(SelectNode::make(e >= 0, mod >= 0, mod <= 0));
+      conditions.push_back(Select(e >= 0, mod >= 0, mod <= 0));
     }
 
     auto p = std::make_pair(div, mod);
@@ -782,7 +790,7 @@ Array<IterVar> IterVarsFromMap(const Array<Var>& vars, const Map<Var, Range>& vr
   for (const Var& v : vars) {
     CHECK(vranges.count(v)) << "A range for the variable " << v
                             << " was not provided in map " << vranges;
-    res.push_back(IterVarNode::make(vranges[v], v, iter_type, thread_tag));
+    res.push_back(IterVar(vranges[v], v, iter_type, thread_tag));
   }
   return res;
 }
@@ -808,11 +816,11 @@ PrimExpr SimplifyReductionDomain(const PrimExpr& expr, const Map<Var, Range>& ou
     // Perform simplification mainly to remove a possibly empty reduction.
     arith::Analyzer analyzer;
     return analyzer.Simplify(
-        ReduceNode::make(red->combiner,
-                         new_source,
-                         new_axis,
-                         All(res->dst->relations),
-                         red->value_index), 3);
+        Reduce(red->combiner,
+               new_source,
+               new_axis,
+               All(res->dst->relations),
+               red->value_index), 3);
   } else {
     return expr;
   }
@@ -864,7 +872,7 @@ std::pair<PrimExpr, PrimExpr> LiftConditionsThroughReduction(const PrimExpr& con
   // start from reduction vars, so that input vars don't depend on them
   arith::IntConstraints ineq_to_solve(allvars, vranges, atomics);
   auto res_ineq = arith::SolveLinearInequalities(ineq_to_solve);
-  atomics = arith::as_conditions(res_ineq.first, res_ineq.second);
+  atomics = arith::AsConditions(allvars, res_ineq.first, res_ineq.second);
 
   // Append the rest part
   PrimExpr rewritten_cond = All(atomics) && rest;
@@ -886,8 +894,8 @@ std::pair<PrimExpr, PrimExpr> LiftConditionsThroughReduction(const PrimExpr& con
 Array<PrimExpr> IterVarsToInequalities(const Array<IterVar>& itervars) {
   Array<PrimExpr> res;
   for (const IterVar& v : itervars) {
-    res.push_back(GENode::make(v->var, v->dom->min));
-    res.push_back(LTNode::make(v->var, v->dom->min + v->dom->extent));
+    res.push_back(GE(v->var, v->dom->min));
+    res.push_back(LT(v->var, v->dom->min + v->dom->extent));
   }
   return res;
 }
@@ -901,7 +909,7 @@ class RemoveRedundantInequalitiesMutator : public ExprMutator {
   }
 
   virtual PrimExpr VisitExpr_(const SelectNode* op) {
-    bool has_side_effect = HasSideEffect(GetRef<PrimExpr>(op));
+    bool has_side_effect = (SideEffect(GetRef<PrimExpr>(op)) > CallEffectKind::kReadState);
     PrimExpr new_cond = analyzer_.Simplify(VisitExpr(op->condition), 3);
     if (is_one(new_cond) && !has_side_effect) {
       return VisitExpr(op->true_value);
@@ -915,12 +923,12 @@ class RemoveRedundantInequalitiesMutator : public ExprMutator {
       RemoveRedundantInequalitiesMutator new_mutator(new_known);
       // Note that we mutate only the true value with the new mutator
       // TODO(sgrechanik-h): Update known conditions for the false value as well
-      return SelectNode::make(new_cond, new_mutator(op->true_value), VisitExpr(op->false_value));
+      return Select(new_cond, new_mutator(op->true_value), VisitExpr(op->false_value));
     }
   }
 
   virtual PrimExpr VisitExpr_(const CallNode* op) {
-    if (op->name == intrinsic::tvm_if_then_else) {
+    if (op->op.same_as(Op::Get("tir.if_then_else"))) {
       PrimExpr new_cond = analyzer_.Simplify(VisitExpr(op->args[0]), 3);
       if (is_one(new_cond)) {
         return VisitExpr(op->args[1]);
@@ -961,7 +969,7 @@ class RemoveRedundantInequalitiesMutator : public ExprMutator {
       new_source.push_back(new_mutator(src));
     }
 
-    return ReduceNode::make(op->combiner, new_source, op->axis, new_cond, op->value_index);
+    return Reduce(op->combiner, new_source, op->axis, new_cond, op->value_index);
   }
 
   virtual PrimExpr VisitExpr_(const EQNode* op) { return MutateAtomic_(GetRef<PrimExpr>(op)); }
@@ -1030,11 +1038,9 @@ PrimExpr TrySimplifyCompute(const PrimExpr& expr, const PrimExpr& cond,
     return new_expr;
   }
 
-  // If it's already a call to a tensor then it will probably be useless to further simplify it.
-  if (const CallNode* call = new_expr.as<CallNode>()) {
-    if (call->call_type == CallNode::CallType::Halide) {
-      return expr;
-    }
+  // If it's already tensor[...] then it will probably be useless to further simplify it.
+  if (new_expr.as<ProducerLoadNode>()) {
+    return expr;
   }
 
   // Compute volumes before and after
@@ -1066,8 +1072,7 @@ PrimExpr TrySimplifyCompute(const PrimExpr& expr, const PrimExpr& cond,
     args.push_back(res->dst_to_src[var]);
   }
 
-  return CallNode::make(expr.dtype(), tensor->op->name, args,
-                        CallNode::CallType::Halide, tensor->op, tensor->value_index);
+  return ProducerLoad(tensor, args);
 }
 
 class FreeVarsVisitor : public StmtExprVisitor {
@@ -1115,11 +1120,6 @@ class FreeVarsVisitor : public StmtExprVisitor {
     StmtExprVisitor::VisitStmt_(op);
   }
 
-  void VisitStmt_(const FreeNode* op) final {
-    VisitExpr(op->buffer_var);
-    StmtExprVisitor::VisitStmt_(op);
-  }
-
   void VisitExpr_(const LoadNode* op) final {
     VisitExpr(op->buffer_var);
     StmtExprVisitor::VisitExpr_(op);
@@ -1144,7 +1144,7 @@ class ReductionAsTensorAccessMutator : public ExprMutator {
     }
 
     PrimExpr new_reduce =
-        ReduceNode::make(op->combiner, new_source, op->axis, op->condition, op->value_index);
+        Reduce(op->combiner, new_source, op->axis, op->condition, op->value_index);
 
     FreeVarsVisitor fv_visitor;
     fv_visitor(new_reduce);
@@ -1171,8 +1171,7 @@ class ReductionAsTensorAccessMutator : public ExprMutator {
       args.push_back(v);
     }
 
-    return CallNode::make(op->dtype, tensor->op->name, args,
-                          CallNode::CallType::Halide, tensor->op, tensor->value_index);
+    return ProducerLoad(tensor, args);
   }
 
  private:
@@ -1202,8 +1201,8 @@ PrimExpr LiftReductions(const PrimExpr& expr,
     }
     PrimExpr new_condition = ReductionAsTensorAccess(red->condition, new_outer_axis, new_vranges);
 
-    return ReduceNode::make(red->combiner, new_source, red->axis,
-                            new_condition, red->value_index);
+    return Reduce(red->combiner, new_source, red->axis,
+                  new_condition, red->value_index);
   } else {
     return ReductionAsTensorAccess(expr, outer_axis, vranges);
   }
@@ -1240,7 +1239,7 @@ PrimExpr OptimizeAndLiftNonzeronessConditionsImpl(const PrimExpr& expr_orig,
           source.Set(0, nz.value);
         }
 
-        new_red = ReduceNode::make(red->combiner, source, red->axis, cond, red->value_index);
+        new_red = Reduce(red->combiner, source, red->axis, cond, red->value_index);
         new_red = SimplifyReductionDomain(new_red, combined_vranges);
         red = new_red.as<ReduceNode>();
 
@@ -1268,14 +1267,14 @@ PrimExpr OptimizeAndLiftNonzeronessConditionsImpl(const PrimExpr& expr_orig,
             LiftConditionsThroughReduction(nz_cond, red->axis, axis);
         new_outer_cond = new_outer_cond && outer_nz_cond;
         new_source.Set(red->value_index,
-                       SelectNode::make(nz_cond, nz_source, make_zero(nz_source.dtype())));
+                       Select(nz_cond, nz_source, make_zero(nz_source.dtype())));
       }
 
-      PrimExpr new_reduce = ReduceNode::make(red->combiner, new_source, red->axis,
-                                             new_reduce_cond, red->value_index);
+      PrimExpr new_reduce = Reduce(red->combiner, new_source, red->axis,
+                                   new_reduce_cond, red->value_index);
       new_reduce =
           TrySimplifyCompute(new_reduce, new_outer_cond, IterVarsToVars(axis), combined_vranges);
-      result = SelectNode::make(new_outer_cond, new_reduce, make_zero(new_reduce.dtype()));
+      result = Select(new_outer_cond, new_reduce, make_zero(new_reduce.dtype()));
     } else {
       return SimplifyReductionDomain(expr, combined_vranges);
     }
@@ -1284,7 +1283,7 @@ PrimExpr OptimizeAndLiftNonzeronessConditionsImpl(const PrimExpr& expr_orig,
     LOG(INFO) << nz.cond << " ? " << nz.value << " : 0";
     PrimExpr new_expr =
         TrySimplifyCompute(nz.value, nz.cond, IterVarsToVars(axis), combined_vranges);
-    result = SelectNode::make(nz.cond, new_expr, make_zero(new_expr.dtype()));
+    result = Select(nz.cond, new_expr, make_zero(new_expr.dtype()));
   }
 
   // Note that RemoveRedundantInequalities can sometimes propagate equalities which

@@ -20,15 +20,15 @@ from tvm.runtime import Object
 from . import _ffi_api
 
 
-@tvm._ffi.register_object("arith.IntGrpBounds")
-class IntGrpBounds(Object):
+@tvm._ffi.register_object("arith.IntGroupBounds")
+class IntGroupBounds(Object):
     """Represent integer grouped bounds which are classified into
        lower bounds (include), upper bounds (include) and equalities.
 
     Parameters
     ----------
     coef : tvm.ir.PrimExpr
-        The coefficient. Must be integer.
+        The coefficient. Must be integer type.
         coef * var >= lower
         coef * var == equal
         coef * var >= upper
@@ -41,10 +41,10 @@ class IntGrpBounds(Object):
     """
     def __init__(self, coef, lower, equal, upper):
         self.__init_handle_by_constructor__(
-            _ffi_api.IntGrpBounds, coef, lower, equal, upper)
+            _ffi_api.IntGroupBounds, coef, lower, equal, upper)
 
     @staticmethod
-    def make_by_range(rng):
+    def from_range(rng):
         """Construct a IntGroupedBounds by Range.
 
         Parameters
@@ -57,13 +57,13 @@ class IntGrpBounds(Object):
         ret : Range
             The constructed range.
         """
-        return _ffi_api.int_grouped_bounds_by_range(rng)
+        return _ffi_api.IntGroupBounds_from_range(rng)
 
     def find_best_range(self):
         """Return the best range from the grouped bounds.
            None if (-inf, +inf).
         """
-        return _ffi_api.IntGrpBounds_FindBestRange(self)
+        return _ffi_api.IntGroupBounds_FindBestRange(self)
 
 
 @tvm._ffi.register_object("arith.IntConstraints")
@@ -171,5 +171,7 @@ def solve_linear_inequalities(equations, variables=None, ranges=None, deskew_ran
     solver = _ffi_api.SolveInequalitiesDeskewRange \
         if deskew_range else _ffi_api.SolveInequalitiesToRange
     if isinstance(equations, IntConstraints):
+        assert variables is None
+        assert ranges is None
         return solver(equations)
     return solver(variables, ranges, equations)
