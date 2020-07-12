@@ -731,7 +731,8 @@ EliminateDivModResult EliminateDivMod(const PrimExpr& expr, Map<Var, Range> rang
   return res;
 }
 
-arith::IntConstraintsTransform EliminateDivModFromDomainConditions(const arith::IntConstraints& domain) {
+arith::IntConstraintsTransform EliminateDivModFromDomainConditions(
+    const arith::IntConstraints& domain) {
   auto elim_res = EliminateDivMod(All(domain->relations), domain->ranges);
 
   Map<Var, Range> new_vranges = elim_res.ranges;
