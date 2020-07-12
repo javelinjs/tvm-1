@@ -105,7 +105,8 @@ Tensor TensorFromExpr(const PrimExpr& expr, const Array<IterVar>& axis,
 }
 
 Tensor TransformTensorBody(const Tensor& tensor,
-                     const std::function<PrimExpr(const PrimExpr&, const Array<IterVar>&)>& func) {
+                           const std::function<PrimExpr(
+                               const PrimExpr&, const Array<IterVar>&)>& func) {
   if (const ComputeOpNode* op = tensor->op.as<ComputeOpNode>()) {
     // Transform only one body
     PrimExpr new_body = func(op->body[tensor->value_index], op->axis);

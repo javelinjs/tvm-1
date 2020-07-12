@@ -104,11 +104,11 @@ TVM_DLL Tensor InlineTensors(const Tensor& tensor,
  *  - Remove redundant variables.
  *  - Infer new variable ranges (hopefully more precise).
  *
- * \param domain The original domain.
+ * \param iter_domains The original domain.
  * \param eliminate_div_mod Whether to eliminate div and mod by introducing new variables.
  */
-TVM_DLL arith::IntConstraintsTransform SimplifyIterDomain(const arith::IntConstraints& domain,
-                                                      bool eliminate_div_mod = true);
+TVM_DLL arith::IntConstraintsTransform SimplifyDomain(
+    const arith::IntConstraints& iter_domains, bool eliminate_div_mod = true);
 
 /*!
  * \brief Perform lifting of conditions of being possible to be non-zero together with
@@ -119,7 +119,7 @@ TVM_DLL arith::IntConstraintsTransform SimplifyIterDomain(const arith::IntConstr
  * \param vranges Optional map from free variables to their value ranges.
  * \return An optimized tensor.
  */
-TVM_DLL Tensor OptimizeAndLiftNonzeronessConditions(
+TVM_DLL Tensor RemoveJacobianAndLiftNonzeroCond(
     const Tensor& tensor,
     const Map<Var, Range>& vranges = Map<Var, Range>());
 
