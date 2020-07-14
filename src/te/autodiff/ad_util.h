@@ -91,6 +91,8 @@ TVM_DLL Tensor InlineTensors(const Tensor& tensor,
                              const Array<Tensor>& inlineable = Array<Tensor>(),
                              bool inline_reductions = false);
 
+TVM_DLL Tensor InlineTailCall(const Tensor& tensor);
+
 /*!
  * \brief Simplify an iteration domain.
  *

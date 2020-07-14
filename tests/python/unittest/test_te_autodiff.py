@@ -180,8 +180,8 @@ def test_topi():
     check_grad(R, [X, W])
 
     # FIXME:
-    # R1 = topi.nn.conv2d(topi.nn.relu(R), W1, 1, 0, 1)
-    # check_grad(R1, [X, W, W1])
+    R1 = topi.nn.conv2d(topi.nn.relu(R), W1, 1, 0, 1)
+    check_grad(R1, [X, W, W1])
 
     R = topi.broadcast_to(W2, (5, 2, 3, 3))
     check_grad(R, [W2])
@@ -193,8 +193,8 @@ def test_topi():
     check_grad(R, X)
 
     # FIXME:
-    # R = topi.nn.pool(X, [2, 2], [2, 2], [0, 0, 0, 0], 'max')
-    # check_grad(R, X)
+    R = topi.nn.pool(X, [2, 2], [2, 2], [0, 0, 0, 0], 'max')
+    check_grad(R, X)
 
     X = te.placeholder((1, 2, 5, 5), name='X')
     R = topi.reshape(X, (1, 32))
@@ -210,8 +210,8 @@ def test_topi():
     check_grad(R, [X, W])
 
     # FIXME:
-    # S = topi.nn.softmax(topi.reshape(R, (1, 50)))
-    # check_grad(S, [X, W])
+    S = topi.nn.softmax(topi.reshape(R, (1, 50)))
+    check_grad(S, [X, W])
 
     S = topi.sigmoid(topi.reshape(R, (1, 50)))
     check_grad(S, [X, W])
@@ -220,8 +220,8 @@ def test_topi():
     check_grad(S, [X, W])
 
     # FIXME:
-    # S = topi.nn.log_softmax(topi.reshape(R, (1, 50)))
-    # check_grad(S, [X, W])
+    S = topi.nn.log_softmax(topi.reshape(R, (1, 50)))
+    check_grad(S, [X, W])
     # check_grad(S, [W], [X])
 
     X = te.placeholder((1, 2, 3, 5), name='X')
@@ -239,17 +239,17 @@ def test_topi():
     check_grad(R2, [X])
 
     # FIXME:
-    # X = te.placeholder((4, 5), name='X')
+    X = te.placeholder((4, 5), name='X')
     # I = te.placeholder((100,), name='I', dtype='int32')
     # R = topi.take(X, topi.abs(I))
     # check_grad(R, [X], [I])
 
     # FIXME:
-    # W = te.placeholder((5, 5), name='W')
-    # exps = topi.exp(topi.nn.dense(X, W))
-    # sumexps = topi.sum(exps, axis=-1, keepdims=True)
-    # R = exps/sumexps
-    # check_grad(R, [X, W], data_range=(-1, 1))
+    W = te.placeholder((5, 5), name='W')
+    exps = topi.exp(topi.nn.dense(X, W))
+    sumexps = topi.sum(exps, axis=-1, keepdims=True)
+    R = exps/sumexps
+    check_grad(R, [X, W], data_range=(-1, 1))
 
 
 if __name__ == "__main__":

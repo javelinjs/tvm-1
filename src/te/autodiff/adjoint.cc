@@ -68,7 +68,8 @@ Tensor VectorJacobianProduct(const Tensor& output, const Tensor& input, const Te
   result = InlineTensors(result, {jac}, false);
   result = RemoveJacobianAndLiftNonzeroCond(result);
   // inline tail call
-  result = InlineTensors(result, result->op->InputTensors(), true);
+  // FIXME: result = InlineTensors(result, result->op->InputTensors(), true);
+  result = InlineTailCall(result);
   return result;
 }
 

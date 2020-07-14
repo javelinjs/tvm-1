@@ -182,5 +182,30 @@ Tensor InlineTensors(const Tensor& tensor, const Array<Tensor>& inlineable,
   return TransformTensorBody(tensor, transformation);
 }
 
+// If expr is a Call node, perform inlining, otherwise do nothing
+PrimExpr InlineThisCall(const PrimExpr& expr) {
+  if (const ProducerLoadNode* op = expr.as<ProducerLoadNode>()) {
+    auto tensor = Downcast<te::Tensor>(op->producer);
+    if (const ComputeOpNode* op_comp = tensor->op.as<ComputeOpNode>()) {
+      Array<Var> tensor_axes;
+      for (const auto& var : op_comp->axis) {
+        tensor_axes.push_back(var->var);
+      }
+
+      Stmt inlined = Inline(Evaluate(expr), tensor->op, tensor_axes,
+                            op_comp->body[tensor->value_index]);
+      if (const EvaluateNode* ev = inlined.as<EvaluateNode>()) {
+        // If it is a reduction, clone it
+        return CloneReduction(ev->value);
+      }
+    }
+  }
+  return expr;
+}
+
+Tensor InlineTailCall(const Tensor& tensor) {
+  return TransformTensorBody(tensor, InlineThisCall);
+}
+
 }  // namespace te
 }  // namespace tvm

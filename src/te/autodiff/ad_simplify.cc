@@ -1275,8 +1275,8 @@ PrimExpr RemoveJacobianAndLiftNonzeroCondImpl(const PrimExpr& expr_orig,
   // we need to extract intermediate inlined reduction as a separate stage (tensor).
   // Sometimes TrySimplifyCompute doesn't perform lift / extraction,
   // so there may be some non-top reductions left, take care of them.
-  result = analyzer.Simplify(LiftReductions(result, IterVarsToVars(axis), combined_vranges), 3);
-  return result;
+  result = LiftReductions(result, IterVarsToVars(axis), combined_vranges);
+  return analyzer.Simplify(result, 3);
 }
 
 Tensor RemoveJacobianAndLiftNonzeroCond(const Tensor& tensor, const Map<Var, Range>& vranges) {
