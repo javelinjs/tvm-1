@@ -70,7 +70,7 @@ def check_grad(out, inputs, args=[], data_range=(-10, 10), desired_grads=None):
                 out_data = tvm.nd.empty(out_shape, out.dtype)
                 mout(out_data, *[tvm.nd.array(d) for d in list(in_data)])
                 return out_data.asnumpy().sum()
-            check_numerical_grads(forward, [d.asnumpy() for d in input_data], g_res)
+            check_numerical_grads(forward, [d.asnumpy() for d in input_data + arg_vals], g_res)
 
     check_device("cpu")
 
@@ -179,7 +179,6 @@ def test_topi():
     R = topi.nn.conv2d(X, W, 1, 1, 1)
     check_grad(R, [X, W])
 
-    # FIXME:
     R1 = topi.nn.conv2d(topi.nn.relu(R), W1, 1, 0, 1)
     check_grad(R1, [X, W, W1])
 
@@ -192,7 +191,6 @@ def test_topi():
     R = topi.nn.pool(X, [2, 2], [2, 2], [0, 0, 0, 0], 'avg')
     check_grad(R, X)
 
-    # FIXME:
     R = topi.nn.pool(X, [2, 2], [2, 2], [0, 0, 0, 0], 'max')
     check_grad(R, X)
 
@@ -209,7 +207,6 @@ def test_topi():
     R = X + topi.nn.conv2d(X + topi.nn.conv2d(X, W, 1, 1, 1), W, 1, 1, 1)
     check_grad(R, [X, W])
 
-    # FIXME:
     S = topi.nn.softmax(topi.reshape(R, (1, 50)))
     check_grad(S, [X, W])
 
@@ -219,10 +216,9 @@ def test_topi():
     S = topi.tanh(topi.reshape(R, (1, 50)))
     check_grad(S, [X, W])
 
-    # FIXME:
     S = topi.nn.log_softmax(topi.reshape(R, (1, 50)))
     check_grad(S, [X, W])
-    # check_grad(S, [W], [X])
+    check_grad(S, [W], [X])
 
     X = te.placeholder((1, 2, 3, 5), name='X')
     Y = te.placeholder((1, 2, 7, 5), name='Y')
@@ -238,13 +234,11 @@ def test_topi():
     R2 = topi.concatenate((R, S), 2)
     check_grad(R2, [X])
 
-    # FIXME:
     X = te.placeholder((4, 5), name='X')
-    # I = te.placeholder((100,), name='I', dtype='int32')
-    # R = topi.take(X, topi.abs(I))
-    # check_grad(R, [X], [I])
+    I = te.placeholder((100,), name='I', dtype='int32')
+    R = topi.take(X, topi.abs(I))
+    check_grad(R, [X], [I])
 
-    # FIXME:
     W = te.placeholder((5, 5), name='W')
     exps = topi.exp(topi.nn.dense(X, W))
     sumexps = topi.sum(exps, axis=-1, keepdims=True)
@@ -253,6 +247,6 @@ def test_topi():
 
 
 if __name__ == "__main__":
-    # test_basic_operation()
-    # test_conv2d()
+    test_basic_operation()
+    test_conv2d()
     test_topi()
