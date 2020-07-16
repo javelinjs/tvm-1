@@ -70,6 +70,7 @@ tvm_option(USE_CPP_RPC "Build CPP RPC" OFF)
 tvm_option(USE_TFLITE "Build with tflite support" OFF)
 tvm_option(USE_TENSORFLOW_PATH "TensorFlow root path when use TFLite" none)
 tvm_option(USE_COREML "Build with coreml support" OFF)
+tvm_option(USE_TARGET_ONNX "Build with ONNX Codegen support" OFF)
 
 if(USE_CPP_RPC AND UNIX)
   message(FATAL_ERROR "USE_CPP_RPC is only supported with WIN32. Use the Makefile for non-Windows.")
@@ -185,6 +186,7 @@ assign_source_group("Include" ${GROUP_INCLUDE})
 
 # Source file lists
 file(GLOB_RECURSE COMPILER_SRCS
+    src/auto_scheduler/*.cc
     src/node/*.cc
     src/ir/*.cc
     src/arith/*.cc
@@ -192,6 +194,7 @@ file(GLOB_RECURSE COMPILER_SRCS
     src/autotvm/*.cc
     src/tir/*.cc
     src/driver/*.cc
+    src/parser/*.cc
     src/printer/*.cc
     src/support/*.cc
     )
@@ -305,6 +308,7 @@ endif(USE_EXAMPLE_EXT_RUNTIME)
 
 # Module rules
 include(cmake/modules/VTA.cmake)
+include(cmake/modules/StandaloneCrt.cmake)
 include(cmake/modules/CUDA.cmake)
 include(cmake/modules/Hexagon.cmake)
 include(cmake/modules/OpenCL.cmake)
@@ -326,6 +330,7 @@ include(cmake/modules/contrib/HybridDump.cmake)
 include(cmake/modules/contrib/TFLite.cmake)
 include(cmake/modules/contrib/TF_TVMDSOOP.cmake)
 include(cmake/modules/contrib/CoreML.cmake)
+include(cmake/modules/contrib/ONNX.cmake)
 
 include(CheckCXXCompilerFlag)
 if(NOT MSVC)
