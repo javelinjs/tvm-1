@@ -1005,7 +1005,8 @@ PrimExpr TrySimplifyCompute(const PrimExpr& expr, const PrimExpr& cond,
   arith::Analyzer analyzer;
   analyzer.Bind(res->dst->ranges);
   PrimExpr new_expr = analyzer.Simplify(Substitute(expr, res->src_to_dst), 3);
-  // TODO: This is mostly done to simplify if_then_else which is not known by the Halide simplifier
+  // TODO: This is mostly done to simplify if_then_else
+  // which is not known by the canonical simplifier
   new_expr = RemoveRedundantInequalities(new_expr, res->dst->relations);
 
   // Keep only those variables of the new vars which are used in the new_expr

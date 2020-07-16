@@ -128,62 +128,8 @@ Tensor TransformTensorBody(const Tensor& tensor,
                              [func](const PrimExpr& e, const Array<IterVar>&) { return func(e); });
 }
 
-// Implements InlineTensors by trying to inline every Call of the given Expr
-class InlineTensorsMutator : public ExprMutator {
- public:
-  explicit InlineTensorsMutator(const Array<Tensor>& inlineable, bool inline_reductions = false)
-      : inline_reductions_(inline_reductions) {
-    for (const Tensor& tensor : inlineable) {
-      inlineable_.emplace(tensor->op.operator->(), tensor->value_index);
-    }
-  }
-
-  PrimExpr VisitExpr_(const ProducerLoadNode* op) final {
-    auto tensor = Downcast<te::Tensor>(op->producer);
-    if (const ComputeOpNode* op_comp = tensor->op.as<ComputeOpNode>()) {
-      // Inline only if the array of inlineable tensors is empty or contains this tensor
-      if (inlineable_.empty() || inlineable_.count({op_comp, tensor->value_index})) {
-        // Inline only compute nodes that are not reductions (unless inline reductions is allowed)
-        if (inline_reductions_ || !op_comp->body[0].as<ReduceNode>()) {
-          PrimExpr expr = GetRef<PrimExpr>(op);
-          Array<Var> tensor_axes;
-          for (const auto& var : op_comp->axis) {
-            tensor_axes.push_back(var->var);
-          }
-
-          Stmt inlined = Inline(Evaluate(expr),
-                                tensor->op,
-                                tensor_axes,
-                                op_comp->body[tensor->value_index]);
-          if (const EvaluateNode* ev = inlined.as<EvaluateNode>()) {
-            // If it is a reduction, clone it
-            expr = CloneReduction(ev->value);
-          }
-          // Inline this call and then try to perform further inlining
-          return VisitExpr(expr);
-        }
-      }
-    }
-    // If we cannot inline this call, we should try to do inlining in its arguments
-    return ExprMutator::VisitExpr_(op);
-  }
-
- private:
-  // Tensors which are allowed to be inlined, represented as pairs (op_node, value_index)
-  std::set<std::pair<const OperationNode*, int>> inlineable_;
-  bool inline_reductions_;
-};
-
-Tensor InlineTensors(const Tensor& tensor, const Array<Tensor>& inlineable,
-                     bool inline_reductions) {
-  auto transformation =
-      [inlineable, inline_reductions](const PrimExpr& e) {
-        return InlineTensorsMutator(inlineable, inline_reductions)(e); };
-  return TransformTensorBody(tensor, transformation);
-}
-
-// If expr is a Call node, perform inlining, otherwise do nothing
-PrimExpr InlineThisCall(const PrimExpr& expr) {
+// If expr is a Tensor Access node, perform inlining, otherwise do nothing
+PrimExpr InlineImmediateTensorAccess(const PrimExpr& expr) {
   if (const ProducerLoadNode* op = expr.as<ProducerLoadNode>()) {
     auto tensor = Downcast<te::Tensor>(op->producer);
     if (const ComputeOpNode* op_comp = tensor->op.as<ComputeOpNode>()) {
@@ -203,8 +149,50 @@ PrimExpr InlineThisCall(const PrimExpr& expr) {
   return expr;
 }
 
-Tensor InlineTailCall(const Tensor& tensor) {
-  return TransformTensorBody(tensor, InlineThisCall);
+// Implements InlineTensors by trying to inline every Call of the given Expr
+class InlineTensorsMutator : public ExprMutator {
+ public:
+  explicit InlineTensorsMutator(const Array<Tensor>& inlineable, bool inline_reductions = false)
+      : inline_reductions_(inline_reductions) {
+    for (const Tensor& tensor : inlineable) {
+      inlineable_.emplace(tensor->op.operator->(), tensor->value_index);
+    }
+  }
+
+  PrimExpr VisitExpr_(const ProducerLoadNode* op) final {
+    auto tensor = Downcast<te::Tensor>(op->producer);
+    if (const ComputeOpNode* op_comp = tensor->op.as<ComputeOpNode>()) {
+      // Inline only if the array of inlineable tensors is empty or contains this tensor
+      if (inlineable_.empty() || inlineable_.count({op_comp, tensor->value_index})) {
+        // Inline only compute nodes that are not reductions (unless inline reductions is allowed)
+        if (inline_reductions_ || !op_comp->body[0].as<ReduceNode>()) {
+          PrimExpr expr = GetRef<PrimExpr>(op);
+          // Inline this tensor access and then try to perform further inlining
+          return VisitExpr(InlineImmediateTensorAccess(expr));
+        }
+      }
+    }
+    // If we cannot inline this call, we should try to do inlining in its arguments
+    return ExprMutator::VisitExpr_(op);
+  }
+
+ private:
+  // Tensors which are allowed to be inlined, represented as pairs (op_node, value_index)
+  std::set<std::pair<const OperationNode*, int>> inlineable_;
+  bool inline_reductions_;
+};
+
+Tensor InlineTensorAccess(const Tensor& tensor, const Array<Tensor>& inlineable,
+                          bool inline_reductions) {
+  auto transformation =
+      [inlineable, inline_reductions](const PrimExpr& e) {
+        return InlineTensorsMutator(inlineable, inline_reductions)(e); };
+  return TransformTensorBody(tensor, transformation);
+}
+
+
+Tensor InlineTailTensorAccess(const Tensor& tensor) {
+  return TransformTensorBody(tensor, InlineImmediateTensorAccess);
 }
 
 }  // namespace te

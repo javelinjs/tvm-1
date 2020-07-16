@@ -24,7 +24,7 @@ from topi.util import get_const_tuple
 import numpy as np
 
 
-def check_grad(out, inputs, args=[], data_range=(-10, 10), desired_grads=None):
+def check_grad(out, inputs, args=[], data_range=(-10, 10), desired_grads=None, assert_no_jacobian=True):
     inputs = inputs if isinstance(inputs, list) else [inputs]
 
     def check_device(device, host="llvm"):
@@ -53,7 +53,10 @@ def check_grad(out, inputs, args=[], data_range=(-10, 10), desired_grads=None):
         grads = te.gradient(out, inputs, head=ones)
         grad_sched = te.create_schedule([grad.op for grad in grads])
         mgrad = tvm.build(grad_sched, list(grads) + inputs + args)
-        # print(tvm.lower(grad_sched, list(grads) + inputs + args, simple_mode=True))
+        if assert_no_jacobian:
+            # TODO(yzhliu): it is better to visit the expression and do assertion
+            lowered_ir = str(tvm.lower(grad_sched, list(grads) + inputs + args, simple_mode=True))
+            assert "jacobian" not in lowered_ir, lowered_ir
 
         grad_data = [tvm.nd.empty(get_const_tuple(i.shape), g.dtype)
                      for i, g in zip(inputs, grads)]
@@ -161,15 +164,6 @@ def test_basic_operation():
     check_grad(Y, X)
 
 
-def test_conv2d():
-    np.random.seed(0)
-    X = te.placeholder((1, 2, 4, 4), name='X')
-    W = te.placeholder((5, 2, 3, 3), name='W')
-
-    R = topi.nn.conv2d(X, W, 1, 1, 1)
-    check_grad(R, [X, W])
-
-
 def test_topi():
     X = te.placeholder((1, 2, 4, 4), name='X')
     W = te.placeholder((5, 2, 3, 3), name='W')
@@ -246,7 +240,92 @@ def test_topi():
     check_grad(R, [X, W], data_range=(-1, 1))
 
 
+def test_stride_dilation():
+    X = te.placeholder((1, 2, 10, 10), name='X')
+    W = te.placeholder((2, 2, 1, 1), name='W')
+
+    Y = topi.nn.conv2d(X, W, 1, 0, 1)
+    check_grad(Y, [X, W])
+    Y = topi.nn.conv2d(X, W, 2, 0, 1)
+    check_grad(Y, [X, W])
+    Y = topi.nn.conv2d(X, W, 3, 0, 1)
+    check_grad(Y, [X, W])
+    Y = topi.nn.conv2d(X, W, 1, 0, 2)
+    check_grad(Y, [X, W])
+    Y = topi.nn.conv2d(X, W, 2, 0, 2)
+    check_grad(Y, [X, W])
+    Y = topi.nn.conv2d(X, W, 3, 0, 2)
+    check_grad(Y, [X, W])
+    Y = topi.nn.conv2d(X, W, 1, 0, 3)
+    check_grad(Y, [X, W])
+    Y = topi.nn.conv2d(X, W, 2, 0, 3)
+    check_grad(Y, [X, W])
+    Y = topi.nn.conv2d(X, W, 3, 0, 3)
+    check_grad(Y, [X, W])
+
+    W = te.placeholder((2, 2, 2, 2), name='W')
+
+    Y = topi.nn.conv2d(X, W, 1, 0, 1)
+    check_grad(Y, [X, W])
+    Y = topi.nn.conv2d(X, W, 2, 0, 1)
+    check_grad(Y, [X, W])
+    Y = topi.nn.conv2d(X, W, 3, 0, 1)
+    check_grad(Y, [X, W])
+    Y = topi.nn.conv2d(X, W, 1, 0, 2)
+    check_grad(Y, [X, W])
+    Y = topi.nn.conv2d(X, W, 2, 0, 2)
+    check_grad(Y, [X, W])
+    Y = topi.nn.conv2d(X, W, 3, 0, 2)
+    check_grad(Y, [X, W])
+    Y = topi.nn.conv2d(X, W, 1, 0, 3)
+    check_grad(Y, [X, W])
+    Y = topi.nn.conv2d(X, W, 2, 0, 3)
+    check_grad(Y, [X, W])
+    Y = topi.nn.conv2d(X, W, 3, 0, 3)
+    check_grad(Y, [X, W])
+
+    W = te.placeholder((2, 2, 3, 3), name='W')
+
+    Y = topi.nn.conv2d(X, W, 1, 0, 1)
+    check_grad(Y, [X, W])
+    Y = topi.nn.conv2d(X, W, 2, 0, 1)
+    check_grad(Y, [X, W])
+    Y = topi.nn.conv2d(X, W, 3, 0, 1)
+    check_grad(Y, [X, W])
+    Y = topi.nn.conv2d(X, W, 1, 0, 2)
+    check_grad(Y, [X, W])
+    Y = topi.nn.conv2d(X, W, 2, 0, 2)
+    check_grad(Y, [X, W])
+    Y = topi.nn.conv2d(X, W, 3, 0, 2)
+    check_grad(Y, [X, W])
+    Y = topi.nn.conv2d(X, W, 1, 0, 3)
+    check_grad(Y, [X, W])
+    Y = topi.nn.conv2d(X, W, 2, 0, 3)
+    check_grad(Y, [X, W])
+    Y = topi.nn.conv2d(X, W, 3, 0, 3)
+    check_grad(Y, [X, W])
+
+    Y = topi.nn.pool(X, [1, 1], [1, 1], [0, 0, 0, 0], 'max')
+    check_grad(Y, [X])
+    Y = topi.nn.pool(X, [1, 1], [2, 2], [0, 0, 0, 0], 'max')
+    check_grad(Y, [X])
+    Y = topi.nn.pool(X, [1, 1], [3, 3], [0, 0, 0, 0], 'max')
+    check_grad(Y, [X])
+    Y = topi.nn.pool(X, [2, 2], [1, 1], [0, 0, 0, 0], 'max')
+    check_grad(Y, [X])
+    Y = topi.nn.pool(X, [2, 2], [2, 2], [0, 0, 0, 0], 'max')
+    check_grad(Y, [X])
+    Y = topi.nn.pool(X, [2, 2], [3, 3], [0, 0, 0, 0], 'max')
+    check_grad(Y, [X])
+    Y = topi.nn.pool(X, [3, 3], [1, 1], [0, 0, 0, 0], 'max')
+    check_grad(Y, [X])
+    Y = topi.nn.pool(X, [3, 3], [2, 2], [0, 0, 0, 0], 'max')
+    check_grad(Y, [X])
+    Y = topi.nn.pool(X, [3, 3], [3, 3], [0, 0, 0, 0], 'max')
+    check_grad(Y, [X])
+
+
 if __name__ == "__main__":
     test_basic_operation()
-    test_conv2d()
     test_topi()
+    test_stride_dilation()

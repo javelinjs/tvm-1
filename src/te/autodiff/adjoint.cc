@@ -65,11 +65,10 @@ Tensor VectorJacobianProduct(const Tensor& output, const Tensor& input, const Te
   Tensor jac = Jacobian(output, input);
   Tensor result = topi::tensordot(head, jac, /*axes=*/output->shape.size(),
                                   output->op->name + "." + input->op->name + ".grad");
-  result = InlineTensors(result, {jac}, false);
+  result = InlineTensorAccess(result, {jac}, false);
   result = RemoveJacobianAndLiftNonzeroCond(result);
   // inline tail call
-  // FIXME: result = InlineTensors(result, result->op->InputTensors(), true);
-  result = InlineTailCall(result);
+  result = InlineTailTensorAccess(result);
   return result;
 }
 

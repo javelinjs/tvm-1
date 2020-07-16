@@ -75,7 +75,7 @@ Tensor TransformTensorBody(
     const std::function<PrimExpr(const PrimExpr&)>& func);
 
 /*!
- * \brief Inline tensors recursively.
+ * \brief Inline tensors access recursively.
  *
  *  This function will inline tensors recursively until it reaches a tensor which is impossible to
  *  inline (a reduction if \p inline_reductions is false, a non-compute tensor, a tensor which is
@@ -86,12 +86,19 @@ Tensor TransformTensorBody(
  *  to inline all tensors.
  * \param inline_reductions Whether to inline reductions (this may result in top-level reduction
  *  nodes).
+ *
+ * \return An inlined tensor
  */
-TVM_DLL Tensor InlineTensors(const Tensor& tensor,
-                             const Array<Tensor>& inlineable = Array<Tensor>(),
-                             bool inline_reductions = false);
+TVM_DLL Tensor InlineTensorAccess(const Tensor& tensor,
+                                  const Array<Tensor>& inlineable = Array<Tensor>(),
+                                  bool inline_reductions = false);
 
-TVM_DLL Tensor InlineTailCall(const Tensor& tensor);
+/*!
+ * \brief Inline tensors access at the tail.
+ * \param tensor The tensor whose body to transform.
+ * \return An inlined tensor
+ */
+TVM_DLL Tensor InlineTailTensorAccess(const Tensor& tensor);
 
 /*!
  * \brief Simplify an iteration domain.
